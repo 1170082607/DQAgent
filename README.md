@@ -1,0 +1,117 @@
+# DQAgent
+
+DQAgent is an engineering-first learning project for building AI Agent capabilities incrementally
+from foundational components. Its purpose is to understand the design of production-oriented agent
+systems instead of treating frameworks as black boxes.
+
+**Status:** Pre-alpha. Phase 1 is implemented: a provider-neutral chat application backed by the
+OpenAI Responses API.
+
+## Goals
+
+- Learn the core abstractions and execution models behind modern AI Agents.
+- Build small, testable capabilities before comparing them with mature frameworks.
+- Evolve from model invocation to tools, runtime, workflow, memory, RAG, MCP, planning, coding
+  agents, and multi-agent collaboration.
+- Apply backend engineering principles such as explicit boundaries, dependency inversion,
+  observability, failure handling, and incremental delivery.
+
+## Non-goals
+
+- Reimplement LangGraph, OpenHands, AutoGen, or the OpenAI Agents SDK feature for feature.
+- Present experimental code as a production-ready Agent platform.
+- Add abstractions for roadmap stages that have not been implemented.
+
+## Phase 1 Capabilities
+
+- Interactive and one-shot command-line chat.
+- In-memory conversation history with optional system prompts.
+- A provider-neutral `LLMClient` application boundary.
+- An OpenAI Responses API adapter.
+- Environment-based configuration with explicit validation.
+- Unit tests, Ruff linting, mypy strict type checking, and GitHub Actions CI.
+
+Streaming, tools, persistence, retries, and production observability are intentionally out of scope
+for Phase 1.
+
+## Installation
+
+DQAgent requires Python 3.11 or newer.
+
+```bash
+python -m venv .venv
+python -m pip install -e ".[dev]"
+```
+
+Activate the virtual environment using the command appropriate for your shell, then configure the
+required environment variables. `.env.example` is a reference file; DQAgent does not automatically
+load `.env` files.
+
+PowerShell:
+
+```powershell
+$env:OPENAI_API_KEY = "your-api-key"
+$env:DQAGENT_MODEL = "your-model-id"
+```
+
+Bash:
+
+```bash
+export OPENAI_API_KEY="your-api-key"
+export DQAGENT_MODEL="your-model-id"
+```
+
+For an OpenAI-compatible endpoint, optionally set `OPENAI_BASE_URL`. Request timeout defaults to 60
+seconds and can be changed with `DQAGENT_TIMEOUT_SECONDS`.
+
+## Usage
+
+Start an interactive conversation:
+
+```bash
+dqagent
+```
+
+Send one message and exit:
+
+```bash
+dqagent --message "Explain the difference between an agent loop and a workflow."
+```
+
+Useful interactive commands:
+
+- `/reset`: clear conversation history while preserving the system prompt.
+- `/exit` or `/quit`: end the session.
+
+## Repository Layout
+
+```text
+src/dqagent/       Application and provider code
+tests/             Automated tests
+docs/roadmap.md    Authoritative development plan
+docs/architecture.md Current implemented architecture
+docs/adr/          Durable architectural decisions
+docs/learning/     Experiments, research, and source-reading notes
+examples/          Runnable usage examples
+```
+
+## Development
+
+```bash
+ruff check .
+mypy src
+pytest
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for change guidelines.
+
+## Documentation
+
+- [Roadmap](docs/roadmap.md)
+- [Architecture](docs/architecture.md)
+- [Architecture Decision Records](docs/adr/README.md)
+- [Learning Notes](docs/learning/README.md)
+
+## License
+
+Licensed under the Apache License 2.0. See [LICENSE](LICENSE).

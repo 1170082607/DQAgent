@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+wheelhouse/
+MANIFEST
+
+# Virtual environments
+.venv/
+.venv-*/
+venv/
+env/
+ENV/
+
+# Test and analysis artifacts
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.hypothesis/
+.pytest_cache/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyright/
+.ruff_cache/
+.tox/
+.nox/
+junit.xml
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+
+# Editors and local agent configuration
+.idea/
+.vscode/
+.codex/
+.agents/
+.local/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
+*.swo
+*~
+
+# Operating systems
+.DS_Store
+._*
+Thumbs.db
+Desktop.ini
