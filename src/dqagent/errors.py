@@ -11,3 +11,7 @@ class ConfigurationError(DQAgentError):
 
 class LLMProviderError(DQAgentError):
     """Raised when an LLM provider request fails or returns invalid data."""
+
+
+class AgentLoopError(DQAgentError):
+    """Raised when an agent cannot reach a final answer within its safety bound."""

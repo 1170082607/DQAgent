@@ -12,3 +12,7 @@ Suitable topics include:
 
 Use descriptive filenames such as `agent-loop.md` or `langgraph-state-model.md`. Promote a conclusion
 to an ADR when it becomes a durable project decision.
+
+## Notes
+
+- [Phase 2 Comparison: DQAgent, OpenAI Agents SDK, and EINO](phase-2-framework-comparison.md)

@@ -19,3 +19,8 @@ Use `NNNN-short-title.md`, for example `0001-provider-neutral-llm-boundary.md`.
 - `Deprecated`: retained for history but no longer recommended.
 
 Start from [0000-template.md](0000-template.md).
+
+## Records
+
+- [ADR-0001: Provider-Neutral LLM Boundary](0001-provider-neutral-llm-boundary.md)
+- [ADR-0002: Explicit Tool Boundary and Bounded Agent Loop](0002-explicit-tool-boundary-and-bounded-loop.md)

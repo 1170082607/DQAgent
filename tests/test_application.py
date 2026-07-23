@@ -3,7 +3,8 @@ from collections.abc import Sequence
 import pytest
 
 from dqagent.application import ChatApplication
-from dqagent.models import Completion, Message, Role
+from dqagent.errors import LLMProviderError
+from dqagent.models import Completion, Message, Role, ToolCall
 
 
 class StubLLM:
@@ -67,3 +68,15 @@ def test_send_rejects_blank_user_input() -> None:
 
     with pytest.raises(ValueError, match="must not be empty"):
         app.send("   ")
+
+
+@pytest.mark.parametrize("content", [None, "I will call a tool."])
+def test_direct_chat_rejects_completions_with_tool_calls(content: str | None) -> None:
+    class ToolCallingLLM:
+        def complete(self, messages: Sequence[Message]) -> Completion:
+            return Completion(content, (ToolCall("call-1", "tool", "{}"),))
+
+    app = ChatApplication(ToolCallingLLM())
+
+    with pytest.raises(LLMProviderError, match="requires a text completion"):
+        app.send("Hi")

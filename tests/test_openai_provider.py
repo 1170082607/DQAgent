@@ -6,7 +6,16 @@ from openai import OpenAIError
 
 from dqagent.config import Settings
 from dqagent.errors import LLMProviderError
-from dqagent.models import Completion, Message, Role
+from dqagent.models import (
+    Completion,
+    Message,
+    Role,
+    ToolCall,
+    ToolDefinition,
+    ToolErrorCode,
+    ToolOutcome,
+    ToolResult,
+)
 from dqagent.providers.openai import OpenAIResponsesClient
 
 
@@ -62,13 +71,23 @@ def test_complete_maps_messages_and_response() -> None:
     ]
 
 
-def test_complete_rejects_empty_provider_response() -> None:
+def test_complete_rejects_response_without_text_or_tool_calls() -> None:
     client = OpenAIResponsesClient(
         make_settings(),
         client=FakeOpenAI(SimpleNamespace(output_text="", id="response-1")),
     )
 
-    with pytest.raises(LLMProviderError, match="empty text response"):
+    with pytest.raises(LLMProviderError, match="neither text nor function calls"):
+        client.complete([Message(Role.USER, "Hi")])
+
+
+def test_complete_rejects_non_text_output() -> None:
+    client = OpenAIResponsesClient(
+        make_settings(),
+        client=FakeOpenAI(SimpleNamespace(output_text=123, output=[], id="response-1")),
+    )
+
+    with pytest.raises(LLMProviderError, match="invalid text output"):
         client.complete([Message(Role.USER, "Hi")])
 
 
@@ -77,3 +96,71 @@ def test_complete_translates_openai_errors() -> None:
 
     with pytest.raises(LLMProviderError, match="provider unavailable"):
         client.complete([Message(Role.USER, "Hi")])
+
+
+def test_complete_maps_tools_calls_and_observations() -> None:
+    function_call = SimpleNamespace(
+        type="function_call",
+        call_id="call-1",
+        name="weather",
+        arguments='{"city":"Beijing"}',
+    )
+    sdk = FakeOpenAI(
+        SimpleNamespace(output_text="", output=[function_call], id="response-1", model="model")
+    )
+    client = OpenAIResponsesClient(make_settings(), client=sdk)
+    definition = ToolDefinition(
+        name="weather",
+        description="Get weather by city.",
+        input_schema={"type": "object"},
+    )
+
+    completion = client.complete([Message(Role.USER, "Weather?")], [definition])
+
+    call = ToolCall("call-1", "weather", '{"city":"Beijing"}')
+    assert completion == Completion(
+        tool_calls=(call,), response_id="response-1", model="model"
+    )
+    assert sdk.responses.calls == [
+        {
+            "model": "test-model",
+            "input": [{"role": "user", "content": "Weather?"}],
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "weather",
+                    "description": "Get weather by city.",
+                    "parameters": {"type": "object"},
+                    "strict": False,
+                }
+            ],
+        }
+    ]
+
+    sdk.responses._response = SimpleNamespace(
+        output_text="Sunny", output=[], id="response-2", model="model"
+    )
+    error_result = ToolResult(
+        "call-1",
+        "weather",
+        "service unavailable",
+        ToolOutcome.ERROR,
+        ToolErrorCode.EXECUTION_ERROR,
+    )
+
+    client.complete([Message(Role.USER, "Weather?"), call, error_result], [definition])
+
+    assert sdk.responses.calls[1]["input"] == [
+        {"role": "user", "content": "Weather?"},
+        {
+            "type": "function_call",
+            "call_id": "call-1",
+            "name": "weather",
+            "arguments": '{"city":"Beijing"}',
+        },
+        {
+            "type": "function_call_output",
+            "call_id": "call-1",
+            "output": "service unavailable",
+        },
+    ]

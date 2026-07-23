@@ -4,8 +4,8 @@ DQAgent is an engineering-first learning project for building AI Agent capabilit
 from foundational components. Its purpose is to understand the design of production-oriented agent
 systems instead of treating frameworks as black boxes.
 
-**Status:** Pre-alpha. Phase 1 is implemented: a provider-neutral chat application backed by the
-OpenAI Responses API.
+**Status:** Pre-alpha. Phase 2 is implemented: a provider-neutral, bounded tool-using agent loop
+backed by the OpenAI Responses API.
 
 ## Goals
 
@@ -22,17 +22,21 @@ OpenAI Responses API.
 - Present experimental code as a production-ready Agent platform.
 - Add abstractions for roadmap stages that have not been implemented.
 
-## Phase 1 Capabilities
+## Phase 2 Capabilities
 
 - Interactive and one-shot command-line chat.
 - In-memory conversation history with optional system prompts.
 - A provider-neutral `LLMClient` application boundary.
 - An OpenAI Responses API adapter.
+- JSON Schema tool definitions and an explicit tool registry.
+- A bounded model/tool/observation loop with repeated-call protection.
+- Structured recovery observations for invalid arguments, unknown tools, timeouts, and tool errors.
+- A built-in `current_time` tool that accepts a numeric UTC offset.
 - Environment-based configuration with explicit validation.
 - Unit tests, Ruff linting, mypy strict type checking, and GitHub Actions CI.
 
-Streaming, tools, persistence, retries, and production observability are intentionally out of scope
-for Phase 1.
+Streaming, persistence, retries, hard cancellation, approval gates, and production observability are
+intentionally deferred to later phases.
 
 ## Installation
 
@@ -77,6 +81,10 @@ Send one message and exit:
 ```bash
 dqagent --message "Explain the difference between an agent loop and a workflow."
 ```
+
+The model can call `current_time` when a request needs current time information. Tool use is
+automatic; tool calls and observations stay inside the agent loop and only the final answer is
+printed.
 
 Useful interactive commands:
 

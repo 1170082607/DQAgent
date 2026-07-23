@@ -43,20 +43,18 @@ accounting.
 
 ## Phase 2: Tools and Agent Loop
 
-**Status:** Next
+**Status:** Complete
 
-Planned outcomes:
-
-- Define tool metadata, input schemas, and execution results.
-- Build an explicit tool registry.
-- Parse provider tool calls without leaking provider types into the application layer.
-- Implement a bounded agent loop: model request, tool execution, observation, and next model request.
-- Define failure behavior for invalid arguments, unknown tools, timeouts, and repeated calls.
-- Compare the minimal implementation with OpenAI Agents SDK and EINO.
+- [x] Define tool metadata, input schemas, and execution results.
+- [x] Build an explicit tool registry.
+- [x] Parse provider tool calls without leaking provider types into the application layer.
+- [x] Implement a bounded agent loop: model request, tool execution, observation, and next model request.
+- [x] Define failure behavior for invalid arguments, unknown tools, timeouts, and repeated calls.
+- [x] Compare the minimal implementation with OpenAI Agents SDK and EINO.
 
 ## Phase 3: Runtime
 
-**Status:** Planned
+**Status:** Next
 
 - Execution context and run identifiers.
 - Structured events and lifecycle states.

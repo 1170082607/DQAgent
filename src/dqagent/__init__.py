@@ -1,6 +1,6 @@
 """DQAgent package."""
 
-from dqagent.application import ChatApplication
+from dqagent.application import AgentApplication, ChatApplication
 from dqagent.models import Message, Role
 
-__all__ = ["ChatApplication", "Message", "Role"]
+__all__ = ["AgentApplication", "ChatApplication", "Message", "Role"]

@@ -1,11 +1,12 @@
-"""Command-line interface for the Phase 1 chat application."""
+"""Command-line interface for the tool-using agent."""
 
 import argparse
 import os
 import sys
 from collections.abc import Sequence
 
-from dqagent.application import ChatApplication
+from dqagent.application import AgentApplication, ChatApplication
+from dqagent.builtin_tools import create_builtin_tool_registry
 from dqagent.config import Settings
 from dqagent.errors import DQAgentError
 from dqagent.providers.openai import OpenAIResponsesClient
@@ -14,7 +15,7 @@ EXIT_COMMANDS = {"/exit", "/quit"}
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Chat with an OpenAI model.")
+    parser = argparse.ArgumentParser(description="Run a tool-using OpenAI agent.")
     parser.add_argument("-m", "--message", help="Send one message and exit.")
     parser.add_argument("--model", help="Override DQAGENT_MODEL.")
     parser.add_argument("--system", help="Optional system prompt for this session.")
@@ -34,7 +35,7 @@ def _settings_from_args(args: argparse.Namespace) -> Settings:
     return Settings.from_env(environ)
 
 
-def _interactive_chat(app: ChatApplication) -> int:
+def _interactive_chat(app: ChatApplication | AgentApplication) -> int:
     print("DQAgent chat. Use /reset to clear the conversation or /exit to quit.")
     while True:
         try:
@@ -60,7 +61,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         settings = _settings_from_args(args)
-        app = ChatApplication(OpenAIResponsesClient(settings), system_prompt=args.system)
+        app = AgentApplication(
+            OpenAIResponsesClient(settings),
+            create_builtin_tool_registry(),
+            system_prompt=args.system,
+        )
 
         if args.message:
             print(app.send(args.message).content)

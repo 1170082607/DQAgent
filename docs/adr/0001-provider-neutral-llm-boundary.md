@@ -14,8 +14,10 @@ details would spread into conversation state and later tool-loop logic.
 
 ## Decision
 
-The application depends on a small `LLMClient` protocol that accepts provider-neutral messages and
-returns a provider-neutral completion.
+The application depends on a small `LLMClient` protocol that accepts provider-neutral conversation
+items and optional tool definitions, then returns a provider-neutral completion. Phase 2 expanded
+the original text-only values with tool calls and tool results without changing the dependency
+direction.
 
 The first adapter uses the OpenAI Python SDK and the Responses API. Request mapping, SDK exceptions,
 and response extraction remain inside `OpenAIResponsesClient`. The CLI acts as the composition root
