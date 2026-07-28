@@ -215,3 +215,4 @@ unsuitable correctness gate.
 - [ADR-0002: Explicit Tool Boundary and Bounded Agent Loop](adr/0002-explicit-tool-boundary-and-bounded-loop.md)
 - [ADR-0003: Observable Runtime and Cooperative Cancellation](adr/0003-observable-runtime-and-cooperative-cancellation.md)
 - [Phase 2 Framework Comparison](learning/phase-2-framework-comparison.md)
+- [Roadmap Reassessment After Phase 3](learning/roadmap-reassessment-after-phase-3.md)

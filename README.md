@@ -4,23 +4,27 @@ DQAgent is an engineering-first learning project for building AI Agent capabilit
 from foundational components. Its purpose is to understand the design of production-oriented agent
 systems instead of treating frameworks as black boxes.
 
-**Status:** Pre-alpha. Phase 3 is implemented: a provider-neutral tool-using agent with an observable,
-bounded runtime backed by the OpenAI Responses API.
+**Status:** Pre-alpha. Phase 3 is implemented: a provider-neutral tool-using agent with an
+observable, bounded runtime backed by the OpenAI Responses API. Phase 4 will establish behavioral
+evaluation before the project adds workflow, persistence, or broader autonomy.
 
 ## Goals
 
 - Learn the core abstractions and execution models behind modern AI Agents.
 - Build small, testable capabilities before comparing them with mature frameworks.
-- Evolve from model invocation to tools, runtime, workflow, memory, RAG, MCP, planning, coding
-  agents, and multi-agent collaboration.
+- Evolve from model invocation to tools and runtime, then through evaluation, durable workflow,
+  context engineering, retrieval, memory, safe action harnesses, integrations, planning, and
+  multi-agent collaboration.
 - Apply backend engineering principles such as explicit boundaries, dependency inversion,
   observability, failure handling, and incremental delivery.
+- Learn when an agent loop, deterministic workflow, or multi-agent design is justified by evidence.
 
 ## Non-goals
 
 - Reimplement LangGraph, OpenHands, AutoGen, or the OpenAI Agents SDK feature for feature.
 - Present experimental code as a production-ready Agent platform.
 - Add abstractions for roadmap stages that have not been implemented.
+- Treat workflow graphs, prompt chains, or additional agents as substitutes for model capability.
 
 ## Phase 3 Capabilities
 
@@ -39,8 +43,10 @@ bounded runtime backed by the OpenAI Responses API.
 - Environment-based configuration with explicit validation.
 - Unit tests, Ruff linting, mypy strict type checking, and GitHub Actions CI.
 
-Streaming, persistence, hard execution isolation, approval gates, durable telemetry delivery, and
-workflow orchestration are intentionally deferred to later phases.
+Behavioral evaluation, streaming, persistence, hard execution isolation, approval gates, durable
+telemetry delivery, and workflow orchestration are intentionally deferred to later phases. From
+Phase 4 onward, evaluation, security, and observability are continuous constraints rather than one
+final hardening step.
 
 ## Installation
 

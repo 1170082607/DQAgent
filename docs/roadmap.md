@@ -2,21 +2,78 @@
 
 ## Vision
 
-Build and understand production-oriented AI Agent systems incrementally, starting from direct model
-interaction and progressing toward reliable agent runtimes and collaboration.
+Build and understand production-oriented AI Agent systems incrementally, from a model/tool loop to
+an evaluated, safe, durable agent harness that can support long-running and collaborative work.
 
-The roadmap is the source of truth for project direction. A phase describes learning and engineering
-outcomes, not a commitment to reproduce every feature of an existing framework.
+The roadmap is the source of truth for project direction. A phase describes a learning outcome and
+an observable engineering capability, not a commitment to reproduce every feature of an existing
+framework.
+
+## Target Outcome
+
+The project is intended to develop mid-to-senior AI Agent engineering judgment. On completion, a
+contributor should be able to:
+
+- Explain where model behavior ends and harness responsibility begins.
+- Choose deliberately between an agent loop, a deterministic workflow, and multiple agents.
+- Design provider, tool, context, persistence, and protocol boundaries with explicit failure
+  behavior.
+- Evaluate probabilistic outcomes and execution trajectories instead of relying on demos.
+- Build safe action environments with permissions, approvals, isolation, and auditability.
+- Operate an agent system with cost, latency, reliability, and security constraints.
+- Read mature frameworks as design references without treating their APIs as architecture.
+
+This is primarily an agent application and harness engineering path. Model training, Agentic RL,
+GUI agents, and low-code platforms are optional study tracks rather than prerequisites.
 
 ## Guiding Principles
 
 - Build the smallest complete capability for the active phase.
-- Understand the execution model before adopting a framework.
-- Compare with mature projects after establishing a working baseline.
-- Keep implemented architecture separate from future plans.
-- Add production concerns when the capability they protect exists.
+- Preserve the simple model/tool loop; add harness mechanisms around clear boundaries.
+- Establish evaluation before adding features whose quality cannot be proven deterministically.
+- Treat model output, retrieved content, tool metadata, and external protocol data as untrusted.
+- Keep current architecture separate from future plans.
+- Compare with mature projects after establishing a working local baseline.
+- Add abstractions for real boundaries or multiple implementations, not hypothetical variation.
+- Do not assume that more orchestration, more tools, or more agents produce better outcomes.
 
-## Phase 0: Repository Foundation
+## Phase Completion Standard
+
+Starting with Phase 4, a phase is complete only when it includes:
+
+- A minimal end-to-end capability with explicit ownership and dependency direction.
+- Tests for externally observable behavior and important failure paths.
+- Evaluation cases or regression evidence appropriate to probabilistic behavior.
+- Structured events and stable error behavior for new execution paths.
+- Updated README, architecture, roadmap, and an ADR when a durable decision is introduced.
+- A source-reading comparison that separates reusable ideas from framework-specific mechanics.
+- Passing Ruff, strict mypy, and pytest checks.
+
+## Retrospective After Phase 3
+
+Phases 0-3 established a sound harness kernel:
+
+- Provider SDK types are isolated behind a neutral `LLMClient` boundary.
+- Model-requested tools are validated and executed through an explicit registry.
+- The model/tool/observation loop is bounded and has defined recovery observations.
+- Each run has identity, deadlines, cooperative cancellation, classified errors, retries, and
+  ordered events.
+- Conversation state commits only after successful execution.
+
+This is stronger than a typical tutorial loop in failure semantics, testability, and provider
+isolation. It is not yet evidence of an effective agent product. The current project cannot measure
+model behavior, manage a finite context over long sessions, persist or resume work, safely expose
+mutating environment tools, or prove that planning and multi-agent designs outperform a simpler
+loop.
+
+The original roadmap placed evaluation, security, and operational concerns in a final hardening
+phase. That sequencing is no longer acceptable: every later feature is probabilistic or expands
+the trust boundary. Evaluation moves to Phase 4, while security and operability become continuous
+tracks.
+
+## Completed Foundation
+
+### Phase 0: Repository Foundation
 
 **Status:** Complete
 
@@ -26,7 +83,7 @@ outcomes, not a commitment to reproduce every feature of an existing framework.
 - [x] GitHub Actions verification workflow.
 - [x] Open-source documentation, contribution guide, and Apache-2.0 license.
 
-## Phase 1: LLM Client and Chat
+### Phase 1: LLM Client and Chat
 
 **Status:** Complete
 
@@ -39,20 +96,20 @@ outcomes, not a commitment to reproduce every feature of an existing framework.
 - [x] Unit tests for application, configuration, and provider mapping.
 
 Deferred from this phase: streaming output, persistent sessions, retries, rate limiting, and usage
-accounting.
+accounting. Retry ownership was added in Phase 3; the remaining concerns are scheduled below.
 
-## Phase 2: Tools and Agent Loop
+### Phase 2: Tools and Agent Loop
 
 **Status:** Complete
 
 - [x] Define tool metadata, input schemas, and execution results.
 - [x] Build an explicit tool registry.
 - [x] Parse provider tool calls without leaking provider types into the application layer.
-- [x] Implement a bounded agent loop: model request, tool execution, observation, and next model request.
+- [x] Implement a bounded agent loop: model request, tool execution, observation, and next request.
 - [x] Define failure behavior for invalid arguments, unknown tools, timeouts, and repeated calls.
 - [x] Compare the minimal implementation with OpenAI Agents SDK and EINO.
 
-## Phase 3: Runtime
+### Phase 3: Runtime
 
 **Status:** Complete
 
@@ -66,26 +123,213 @@ and tool boundaries, but Python cannot force-stop an already-running thread. Har
 isolation, durable event delivery, tool retry/idempotency policies, and concurrent tool execution
 remain later production concerns.
 
-Runtime precedes workflow because workflows require a stable execution lifecycle and event model.
+## Planned Development
 
-## Phase 4: Workflow Engine
+### Phase 4: Evaluation Foundation
 
 **Status:** Next
 
-- Explicit state and transitions.
-- Sequential, conditional, and parallel execution.
-- Checkpointing and resumability boundaries.
-- Comparison with LangGraph's graph and state model.
+**Outcome:** Make agent behavior measurable before adding more behavior.
 
-## Later Phases
+- Define versioned evaluation cases with inputs, fixtures, expected outcomes, and trace constraints.
+- Evaluate final-answer properties, tool selection and arguments, trajectory invariants, latency,
+  attempts, and token usage where the provider exposes it.
+- Keep deterministic runtime tests separate from probabilistic model evaluations.
+- Add a deterministic evaluation mode for CI and an explicit, credentialed live-model mode for
+  local runs.
+- Produce a baseline report for the Phase 3 agent and make regressions visible.
+- Study BFCL and GAIA evaluation semantics without making a large benchmark suite a runtime
+  dependency.
 
-5. Memory and session persistence.
-6. Retrieval-augmented generation.
-7. MCP client and server integration.
-8. Planning and task decomposition.
-9. Coding-agent environment and action loop.
-10. Multi-agent coordination.
-11. Production hardening: evaluation, security, tenancy, scaling, and operations.
+The first evaluators should be deterministic predicates and structured trace checks. LLM-as-judge
+may be added only for qualities that cannot be evaluated directly, with calibration examples and
+known limitations documented.
 
-Later phases remain directional. Their module boundaries should not be created until the preceding
-phases reveal concrete requirements.
+### Phase 5: Workflow and Durable Execution
+
+**Status:** Planned
+
+**Outcome:** Orchestrate deterministic multi-step work with explicit state and recovery.
+
+- Define workflow state, nodes, transitions, terminal states, and validation rules.
+- Implement sequential and conditional execution before bounded parallel branches.
+- Specify branch merge, sibling cancellation, partial failure, and result ordering semantics.
+- Add checkpoint storage, interruption, resume, and replay/idempotency boundaries.
+- Reuse `RunContext` and runtime events instead of creating a second lifecycle model.
+- Compare the implementation with LangGraph persistence/interrupts and EINO graph execution.
+
+A workflow is a deterministic orchestration mechanism, not a substitute for model agency. Model
+decisions remain inside agent nodes; the graph owns known control flow, durable progress, and human
+or system interrupts.
+
+### Phase 6: Context Engineering and Sessions
+
+**Status:** Planned
+
+**Outcome:** Keep long-running model context relevant, bounded, and recoverable.
+
+- Separate durable session transcripts from the active model context.
+- Add session identity, persistence, resume, and explicit conversation concurrency behavior.
+- Assemble prompts from owned sections instead of one hard-coded system string.
+- Define context budgets and preserve tool-call/tool-result pairing during trimming.
+- Add cheap structural compaction before model-generated summaries and retain summary provenance.
+- Load project knowledge on demand rather than injecting all available instructions up front.
+- Evaluate long-session constraint retention, context overflow recovery, and compaction loss.
+
+Session storage answers "what happened"; context construction answers "what should the model see
+now." They must remain separate responsibilities.
+
+### Phase 7: Retrieval-Augmented Generation
+
+**Status:** Planned
+
+**Outcome:** Ground answers in external knowledge with measurable retrieval quality.
+
+- Build an ingestion pipeline with document identity, chunking, metadata, and update/delete
+  behavior.
+- Define provider-neutral embedding and retrieval boundaries only when concrete implementations
+  exist.
+- Start with a small local store and explicit indexing lifecycle.
+- Return provenance with retrieved content and preserve citations through the answer path.
+- Evaluate retrieval independently with recall-oriented metrics before evaluating generated answers.
+- Address stale data, duplicate chunks, prompt injection in retrieved content, and empty retrieval.
+
+RAG is an external knowledge service. It is not conversation history or long-term user memory.
+
+### Phase 8: Long-Term Memory
+
+**Status:** Planned
+
+**Outcome:** Retain useful experience across sessions without turning the transcript into memory.
+
+- Define memory records, scope, provenance, confidence, and lifecycle.
+- Separate memory selection, extraction, retrieval, consolidation, correction, and forgetting.
+- Reuse persistence and retrieval capabilities without hiding memory policy inside storage adapters.
+- Support user-visible inspection and deletion before storing sensitive or durable facts.
+- Evaluate false memories, stale preferences, cross-session recall, and harmful over-retrieval.
+
+Memory is selected state with policy. Saving every message or embedding the full transcript does not
+meet this phase's objective.
+
+### Phase 9: Coding Agent Harness and Safety
+
+**Status:** Planned
+
+**Outcome:** Validate the accumulated runtime in a realistic, bounded action environment.
+
+- Add workspace-scoped read, search, patch, and command tools with explicit output limits.
+- Introduce policy decisions for allow, deny, and user approval before side-effecting actions.
+- Add pre/post tool hooks without coupling policy extensions to the core loop.
+- Define secret handling, path containment, subprocess limits, and hard isolation boundaries.
+- Load repository instructions and reusable skills on demand through the context layer.
+- Observe changes through diffs and validator results, not only tool return strings.
+- Evaluate bounded coding tasks in disposable fixture repositories.
+
+The initial coding agent should be useful with one model loop and a strong harness. Planning and
+multiple agents are added only after evaluation shows where the simpler design fails.
+
+### Phase 10: MCP and External Integration
+
+**Status:** Planned
+
+**Outcome:** Discover and invoke external capabilities through a governed protocol boundary.
+
+- Implement an MCP client for tool discovery and invocation before building a server.
+- Translate schemas into the existing tool boundary with stable namespacing and collision behavior.
+- Define transport lifecycle, cancellation, timeouts, authentication, and connection failures.
+- Treat server instructions, schemas, tool results, resources, and prompts as untrusted data.
+- Integrate MCP tools with the same permission, event, and evaluation paths as local tools.
+- Add resources, prompts, remote transports, or an MCP server only when a concrete use case requires
+  them.
+
+MCP standardizes integration; it does not add planning or reasoning ability.
+
+### Phase 11: Planning and Long-Running Tasks
+
+**Status:** Planned
+
+**Outcome:** Make complex work explicit, recoverable, and budgeted.
+
+- Distinguish an in-context checklist from a durable task graph.
+- Implement task dependencies, ownership, status transitions, and stale-work recovery.
+- Compare ReAct, plan-and-execute, and reflection using the Phase 4 evaluation harness.
+- Add background operation handles and completion notifications without blocking the model loop.
+- Resume interrupted work from durable task and workflow state.
+- Bound replanning, reflection, time, model calls, and cost.
+
+Planning is a policy choice, not a mandatory wrapper around every request. A plan must improve an
+observed outcome enough to justify extra latency and tokens.
+
+### Phase 12: Multi-Agent Coordination
+
+**Status:** Planned
+
+**Outcome:** Delegate only work that benefits from isolation or parallel ownership.
+
+- Start with a subagent call that has an explicit input contract and isolated context.
+- Add durable task ownership, result envelopes, asynchronous mailboxes, and cancellation
+  propagation.
+- Define concurrency limits, duplicate claims, partial failure, and orphan recovery.
+- Isolate mutable workspaces for parallel coding tasks.
+- Compare local delegation with cross-process agent protocols before adopting A2A or equivalent.
+- Evaluate quality, latency, and cost against the best single-agent baseline.
+
+Multi-agent coordination is a distributed system with nondeterministic workers. It should not be
+used as a role-playing abstraction or as a substitute for a function, tool, or workflow node.
+
+### Phase 13: Production Readiness and Capstone
+
+**Status:** Planned
+
+**Outcome:** Demonstrate and operate one coherent agent product under production constraints.
+
+- Integrate the accumulated capabilities into a repository-maintenance capstone or another domain
+  chosen through an ADR before this phase begins.
+- Add streaming and user-visible progress without weakening terminal-state guarantees.
+- Add durable telemetry delivery, cost budgets, rate limiting, backpressure, and overload behavior.
+- Define authentication, tenancy, secret management, data retention, and audit requirements.
+- Move untrusted execution behind a process, container, or remote-worker isolation boundary.
+- Run fault-injection, load, recovery, security, and end-to-end evaluation suites.
+- Publish an architecture narrative, benchmark report, operations runbook, and recorded demo.
+
+This phase closes production gaps; it does not postpone all production thinking. The cross-cutting
+tracks below apply from Phase 4 onward.
+
+## Continuous Engineering Tracks
+
+- **Evaluation:** Every new capability adds cases to the shared regression corpus and records its
+  quality, latency, and cost impact.
+- **Security:** Every new action or data source defines trust, validation, permission, and leakage
+  behavior when introduced.
+- **Observability:** New states and boundaries emit correlated events before concrete telemetry
+  backends are added.
+- **Durability:** Side effects, retries, checkpoints, and replay document idempotency expectations.
+- **Source reading:** Each phase compares a small local implementation with one or two mature
+  systems and records versioned evidence under `docs/learning/`.
+
+## Optional Study Tracks
+
+These topics are valuable but should not interrupt the main path without a concrete role or project
+need:
+
+- Agentic RL, supervised fine-tuning, and trajectory-based model improvement.
+- Browser, GUI, voice, and multimodal agents.
+- Low-code agent platforms.
+- Additional model providers beyond the implementation needed to validate the neutral boundary.
+- Large-scale distributed serving beyond the capstone's operational requirements.
+
+## Reassessment Sources
+
+The Phase 3 reassessment used the following projects as references, not templates:
+
+- [Hello-Agents](https://github.com/datawhalechina/hello-agents): broad curriculum covering agent
+  paradigms, framework construction, memory/RAG, context engineering, protocols, evaluation, and
+  capstone applications.
+- [learn-claude-code](https://github.com/shareAI-lab/learn-claude-code): incremental harness design
+  covering permissions, hooks, context compaction, memory, task systems, background work, teams,
+  isolation, and MCP around a stable agent loop.
+- [OpenAI Agents SDK and EINO comparison](learning/phase-2-framework-comparison.md): runtime, tool,
+  graph, tracing, checkpoint, and collaboration reference points already studied in Phase 2.
+
+See [Roadmap Reassessment After Phase 3](learning/roadmap-reassessment-after-phase-3.md) for the
+evidence, trade-offs, and rejected sequencing alternatives.
