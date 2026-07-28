@@ -3,6 +3,7 @@
 from collections.abc import Sequence
 from typing import Protocol
 
+from dqagent.execution import RunContext
 from dqagent.models import Completion, ConversationItem, ToolDefinition
 
 
@@ -13,6 +14,8 @@ class LLMClient(Protocol):
         self,
         messages: Sequence[ConversationItem],
         tools: Sequence[ToolDefinition] = (),
+        *,
+        context: RunContext | None = None,
     ) -> Completion:
-        """Generate text or tool calls from an ordered conversation history."""
+        """Generate text or tool calls within an optional execution context."""
         ...

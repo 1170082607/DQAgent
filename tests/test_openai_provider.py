@@ -1,11 +1,20 @@
+import time
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
-from openai import OpenAIError
+from openai import (
+    APIConnectionError,
+    APITimeoutError,
+    InternalServerError,
+    OpenAIError,
+    RateLimitError,
+)
 
 from dqagent.config import Settings
-from dqagent.errors import LLMProviderError
+from dqagent.errors import ErrorCategory, LLMProviderError, RunDeadlineExceededError
+from dqagent.execution import RunContext
 from dqagent.models import (
     Completion,
     Message,
@@ -41,6 +50,38 @@ class FailingResponses:
 
 class FailingOpenAI:
     responses = FailingResponses()
+
+
+class ErrorResponses:
+    def __init__(self, error: OpenAIError) -> None:
+        self._error = error
+
+    def create(self, **kwargs: Any) -> object:
+        raise self._error
+
+
+class ErrorOpenAI:
+    def __init__(self, error: OpenAIError) -> None:
+        self.responses = ErrorResponses(error)
+
+
+class TimeoutResponses:
+    def create(self, **kwargs: Any) -> object:
+        raise APITimeoutError(request=httpx.Request("POST", "https://example.test"))
+
+
+class TimeoutOpenAI:
+    responses = TimeoutResponses()
+
+
+class DelayedTimeoutResponses:
+    def create(self, **kwargs: Any) -> object:
+        time.sleep(0.005)
+        raise APITimeoutError(request=httpx.Request("POST", "https://example.test"))
+
+
+class DelayedTimeoutOpenAI:
+    responses = DelayedTimeoutResponses()
 
 
 def make_settings() -> Settings:
@@ -94,8 +135,89 @@ def test_complete_rejects_non_text_output() -> None:
 def test_complete_translates_openai_errors() -> None:
     client = OpenAIResponsesClient(make_settings(), client=FailingOpenAI())
 
-    with pytest.raises(LLMProviderError, match="provider unavailable"):
+    with pytest.raises(LLMProviderError, match="provider unavailable") as error:
         client.complete([Message(Role.USER, "Hi")])
+
+    assert error.value.category is ErrorCategory.PROVIDER
+    assert error.value.retryable is False
+
+
+def test_complete_classifies_timeout_as_retryable() -> None:
+    client = OpenAIResponsesClient(make_settings(), client=TimeoutOpenAI())
+
+    with pytest.raises(LLMProviderError) as error:
+        client.complete([Message(Role.USER, "Hi")])
+
+    assert error.value.category is ErrorCategory.TIMEOUT
+    assert error.value.retryable is True
+
+
+@pytest.mark.parametrize(
+    ("provider_error", "category"),
+    [
+        (
+            RateLimitError(
+                "rate limited",
+                response=httpx.Response(
+                    429,
+                    request=httpx.Request("POST", "https://example.test"),
+                ),
+                body=None,
+            ),
+            ErrorCategory.RATE_LIMIT,
+        ),
+        (
+            APIConnectionError(
+                request=httpx.Request("POST", "https://example.test"),
+            ),
+            ErrorCategory.UNAVAILABLE,
+        ),
+        (
+            InternalServerError(
+                "server error",
+                response=httpx.Response(
+                    500,
+                    request=httpx.Request("POST", "https://example.test"),
+                ),
+                body=None,
+            ),
+            ErrorCategory.UNAVAILABLE,
+        ),
+    ],
+)
+def test_complete_classifies_retryable_provider_errors(
+    provider_error: OpenAIError,
+    category: ErrorCategory,
+) -> None:
+    client = OpenAIResponsesClient(make_settings(), client=ErrorOpenAI(provider_error))
+
+    with pytest.raises(LLMProviderError) as error:
+        client.complete([Message(Role.USER, "Hi")])
+
+    assert error.value.category is category
+    assert error.value.retryable is True
+
+
+def test_complete_prefers_exhausted_run_deadline_over_provider_timeout() -> None:
+    client = OpenAIResponsesClient(make_settings(), client=DelayedTimeoutOpenAI())
+    context = RunContext(run_id="run-timeout", timeout_seconds=0.001)
+
+    with pytest.raises(RunDeadlineExceededError) as error:
+        client.complete([Message(Role.USER, "Hi")], context=context)
+
+    assert error.value.run_id == "run-timeout"
+
+
+def test_complete_caps_provider_timeout_by_run_deadline() -> None:
+    sdk = FakeOpenAI(SimpleNamespace(output_text="Done", output=[]))
+    client = OpenAIResponsesClient(make_settings(), client=sdk)
+    context = RunContext(run_id="run-1", timeout_seconds=5)
+
+    client.complete([Message(Role.USER, "Hi")], context=context)
+
+    request_timeout = sdk.responses.calls[0]["timeout"]
+    assert isinstance(request_timeout, float)
+    assert 0 < request_timeout <= 5
 
 
 def test_complete_maps_tools_calls_and_observations() -> None:

@@ -3,11 +3,13 @@
 from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 
+from dqagent.execution import RunContext
 from dqagent.models import ToolDefinition
 from dqagent.tools import Tool, ToolRegistry
 
 
-def _current_time(arguments: Mapping[str, object]) -> str:
+def _current_time(arguments: Mapping[str, object], context: RunContext) -> str:
+    context.check_active()
     raw_offset = arguments["utc_offset_hours"]
     if isinstance(raw_offset, bool) or not isinstance(raw_offset, (int, float)):
         raise ValueError("utc_offset_hours must be a number")

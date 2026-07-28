@@ -3,6 +3,8 @@ from collections.abc import Mapping
 
 import pytest
 
+from dqagent.errors import RunDeadlineExceededError
+from dqagent.execution import RunContext
 from dqagent.models import ToolCall, ToolDefinition, ToolErrorCode, ToolOutcome
 from dqagent.tools import Tool, ToolRegistry
 
@@ -13,7 +15,8 @@ def make_tool(
     name: str = "greet",
     timeout_seconds: float = 1.0,
 ) -> Tool:
-    def default_handler(arguments: Mapping[str, object]) -> str:
+    def default_handler(arguments: Mapping[str, object], context: RunContext) -> str:
+        context.check_active()
         return f"hello {arguments['name']}"
 
     return Tool(
@@ -61,7 +64,7 @@ def test_registry_returns_structured_call_errors(
 
 
 def test_registry_translates_handler_failure() -> None:
-    def fail(arguments: Mapping[str, object]) -> str:
+    def fail(arguments: Mapping[str, object], context: RunContext) -> str:
         raise RuntimeError("backend unavailable")
 
     result = ToolRegistry((make_tool(fail),)).execute(
@@ -73,7 +76,7 @@ def test_registry_translates_handler_failure() -> None:
 
 
 def test_registry_times_out_slow_handler() -> None:
-    def slow(arguments: Mapping[str, object]) -> str:
+    def slow(arguments: Mapping[str, object], context: RunContext) -> str:
         time.sleep(0.05)
         return "late"
 
@@ -84,6 +87,22 @@ def test_registry_times_out_slow_handler() -> None:
     assert result.error_code is ToolErrorCode.TIMEOUT
 
 
+def test_run_deadline_interrupts_waiting_for_tool_handler() -> None:
+    def slow(arguments: Mapping[str, object], context: RunContext) -> str:
+        time.sleep(0.05)
+        return "late"
+
+    context = RunContext(run_id="run-tool-timeout", timeout_seconds=0.001)
+
+    with pytest.raises(RunDeadlineExceededError) as error:
+        ToolRegistry((make_tool(slow),)).execute(
+            ToolCall("call-1", "greet", '{"name":"Ada"}'),
+            context,
+        )
+
+    assert error.value.run_id == "run-tool-timeout"
+
+
 def test_registry_rejects_duplicate_names_and_invalid_schema() -> None:
     registry = ToolRegistry((make_tool(),))
     with pytest.raises(ValueError, match="already registered"):
@@ -91,7 +110,13 @@ def test_registry_rejects_duplicate_names_and_invalid_schema() -> None:
 
     invalid = Tool(
         ToolDefinition("invalid", "Invalid schema.", {"type": "array"}),
-        lambda arguments: "unused",
+        lambda arguments, context: "unused",
     )
     with pytest.raises(ValueError, match="must describe an object"):
         registry.register(invalid)
+
+
+@pytest.mark.parametrize("timeout", [0, float("nan"), float("inf")])
+def test_tool_rejects_invalid_timeout(timeout: float) -> None:
+    with pytest.raises(ValueError, match="finite number greater than zero"):
+        make_tool(timeout_seconds=timeout)

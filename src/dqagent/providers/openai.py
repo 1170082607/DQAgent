@@ -3,7 +3,14 @@
 from collections.abc import Sequence
 from typing import Any
 
-from openai import OpenAI, OpenAIError
+from openai import (
+    APIConnectionError,
+    APITimeoutError,
+    InternalServerError,
+    OpenAI,
+    OpenAIError,
+    RateLimitError,
+)
 from openai.types.responses import (
     FunctionToolParam,
     ResponseInputItemParam,
@@ -11,7 +18,8 @@ from openai.types.responses import (
 )
 
 from dqagent.config import Settings
-from dqagent.errors import LLMProviderError
+from dqagent.errors import ErrorCategory, LLMProviderError
+from dqagent.execution import RunContext
 from dqagent.models import (
     Completion,
     ConversationItem,
@@ -27,17 +35,23 @@ class OpenAIResponsesClient:
 
     def __init__(self, settings: Settings, client: Any | None = None) -> None:
         self._model = settings.model
+        self._timeout_seconds = settings.timeout_seconds
         self._client = client or OpenAI(
             api_key=settings.api_key,
             base_url=settings.base_url,
             timeout=settings.timeout_seconds,
+            max_retries=0,
         )
 
     def complete(
         self,
         messages: Sequence[ConversationItem],
         tools: Sequence[ToolDefinition] = (),
+        *,
+        context: RunContext | None = None,
     ) -> Completion:
+        if context is not None:
+            context.check_active()
         request_messages: ResponseInputParam = [self._map_input(item) for item in messages]
         request_tools: list[FunctionToolParam] = [
             {
@@ -50,20 +64,38 @@ class OpenAIResponsesClient:
             for tool in tools
         ]
 
+        request_options: dict[str, Any] = {}
+        if context is not None:
+            remaining_seconds = context.remaining_seconds
+            if remaining_seconds is not None:
+                if remaining_seconds <= 0:
+                    context.check_active()
+                request_options["timeout"] = min(
+                    self._timeout_seconds,
+                    remaining_seconds,
+                )
+
         try:
             if request_tools:
                 response = self._client.responses.create(
                     model=self._model,
                     input=request_messages,
                     tools=request_tools,
+                    **request_options,
                 )
             else:
                 response = self._client.responses.create(
                     model=self._model,
                     input=request_messages,
+                    **request_options,
                 )
         except OpenAIError as exc:
-            raise LLMProviderError(f"OpenAI request failed: {exc}") from exc
+            if context is not None:
+                context.check_active()
+            raise self._translate_error(exc) from exc
+
+        if context is not None:
+            context.check_active()
 
         raw_output_text = getattr(response, "output_text", None)
         if raw_output_text is not None and not isinstance(raw_output_text, str):
@@ -91,6 +123,28 @@ class OpenAIResponsesClient:
             response_id=getattr(response, "id", None),
             model=getattr(response, "model", None),
         )
+
+    @staticmethod
+    def _translate_error(error: OpenAIError) -> LLMProviderError:
+        if isinstance(error, APITimeoutError):
+            return LLMProviderError(
+                f"OpenAI request timed out: {error}",
+                category=ErrorCategory.TIMEOUT,
+                retryable=True,
+            )
+        if isinstance(error, RateLimitError):
+            return LLMProviderError(
+                f"OpenAI rate limit exceeded: {error}",
+                category=ErrorCategory.RATE_LIMIT,
+                retryable=True,
+            )
+        if isinstance(error, (APIConnectionError, InternalServerError)):
+            return LLMProviderError(
+                f"OpenAI service unavailable: {error}",
+                category=ErrorCategory.UNAVAILABLE,
+                retryable=True,
+            )
+        return LLMProviderError(f"OpenAI request failed: {error}")
 
     @staticmethod
     def _map_input(item: ConversationItem) -> ResponseInputItemParam:

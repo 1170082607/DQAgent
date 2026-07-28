@@ -54,18 +54,23 @@ accounting.
 
 ## Phase 3: Runtime
 
-**Status:** Next
+**Status:** Complete
 
-- Execution context and run identifiers.
-- Structured events and lifecycle states.
-- Cancellation, deadlines, retries, and error classification.
-- Hooks for tracing, metrics, and audit logs.
+- [x] Execution context with run identifiers, deadlines, cancellation, and metadata.
+- [x] Structured events and explicit completed, failed, cancelled, and timed-out lifecycle states.
+- [x] Stable error categories and bounded retries for retryable model-provider failures.
+- [x] Event sinks for tracing, metrics, and audit adapters.
+
+Cancellation is cooperative. A deadline bounds how long the caller waits and is propagated to model
+and tool boundaries, but Python cannot force-stop an already-running thread. Hard execution
+isolation, durable event delivery, tool retry/idempotency policies, and concurrent tool execution
+remain later production concerns.
 
 Runtime precedes workflow because workflows require a stable execution lifecycle and event model.
 
 ## Phase 4: Workflow Engine
 
-**Status:** Planned
+**Status:** Next
 
 - Explicit state and transitions.
 - Sequential, conditional, and parallel execution.

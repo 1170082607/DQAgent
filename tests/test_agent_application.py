@@ -3,7 +3,8 @@ from collections.abc import Mapping, Sequence
 import pytest
 
 from dqagent.application import AgentApplication
-from dqagent.errors import AgentLoopError
+from dqagent.errors import AgentLoopError, RunCancelledError
+from dqagent.execution import RunContext
 from dqagent.models import (
     Completion,
     ConversationItem,
@@ -14,6 +15,7 @@ from dqagent.models import (
     ToolErrorCode,
     ToolResult,
 )
+from dqagent.runtime import AgentRuntime, RetryPolicy
 from dqagent.tools import Tool, ToolRegistry
 
 
@@ -28,13 +30,16 @@ class StubLLM:
         self,
         messages: Sequence[ConversationItem],
         tools: Sequence[ToolDefinition] = (),
+        *,
+        context: RunContext | None = None,
     ) -> Completion:
         self.requests.append((tuple(messages), tuple(tools)))
         return next(self._completions)
 
 
 def make_registry(calls: list[str] | None = None) -> ToolRegistry:
-    def greet(arguments: Mapping[str, object]) -> str:
+    def greet(arguments: Mapping[str, object], context: RunContext) -> str:
+        context.check_active()
         name = str(arguments["name"])
         if calls is not None:
             calls.append(name)
@@ -58,10 +63,26 @@ def make_registry(calls: list[str] | None = None) -> ToolRegistry:
     )
 
 
+def make_app(
+    llm: StubLLM,
+    registry: ToolRegistry,
+    *,
+    system_prompt: str | None = None,
+    max_iterations: int = 8,
+) -> AgentApplication:
+    runtime = AgentRuntime(
+        llm,
+        registry,
+        max_iterations=max_iterations,
+        retry_policy=RetryPolicy(max_attempts=1),
+    )
+    return AgentApplication(runtime, system_prompt=system_prompt)
+
+
 def test_agent_executes_tool_and_commits_complete_history() -> None:
     call = ToolCall("call-1", "greet", '{"name":"Ada"}')
     llm = StubLLM([Completion(tool_calls=(call,)), Completion("Done")])
-    app = AgentApplication(llm, make_registry(), system_prompt="Use tools.")
+    app = make_app(llm, make_registry(), system_prompt="Use tools.")
 
     response = app.send("Say hello")
 
@@ -89,7 +110,7 @@ def test_agent_rejects_repeated_semantic_call_without_executing_it_again() -> No
             Completion("Done"),
         ]
     )
-    app = AgentApplication(llm, make_registry(executions))
+    app = make_app(llm, make_registry(executions))
 
     app.send("Say hello")
 
@@ -102,7 +123,7 @@ def test_agent_rejects_repeated_semantic_call_without_executing_it_again() -> No
 def test_agent_returns_tool_errors_to_model_for_recovery() -> None:
     unknown = ToolCall("call-1", "missing", "{}")
     llm = StubLLM([Completion(tool_calls=(unknown,)), Completion("Cannot use that tool")])
-    app = AgentApplication(llm, make_registry())
+    app = make_app(llm, make_registry())
 
     app.send("Do something")
 
@@ -117,9 +138,29 @@ def test_agent_does_not_commit_when_iteration_limit_is_reached() -> None:
         ToolCall("call-2", "greet", '{"name":"Grace"}'),
     ]
     llm = StubLLM([Completion(tool_calls=(call,)) for call in calls])
-    app = AgentApplication(llm, make_registry(), system_prompt="Use tools.", max_iterations=2)
+    app = make_app(
+        llm,
+        make_registry(),
+        system_prompt="Use tools.",
+        max_iterations=2,
+    )
 
     with pytest.raises(AgentLoopError, match="within 2 model calls"):
         app.send("Keep going")
+
+    assert app.messages == (Message(Role.SYSTEM, "Use tools."),)
+
+
+def test_agent_does_not_commit_cancelled_run() -> None:
+    app = make_app(
+        StubLLM([]),
+        make_registry(),
+        system_prompt="Use tools.",
+    )
+    context = RunContext(run_id="run-cancelled")
+    context.cancel("caller cancelled")
+
+    with pytest.raises(RunCancelledError, match="caller cancelled"):
+        app.run("Do not commit", context=context)
 
     assert app.messages == (Message(Role.SYSTEM, "Use tools."),)

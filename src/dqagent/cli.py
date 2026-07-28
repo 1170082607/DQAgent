@@ -10,6 +10,7 @@ from dqagent.builtin_tools import create_builtin_tool_registry
 from dqagent.config import Settings
 from dqagent.errors import DQAgentError
 from dqagent.providers.openai import OpenAIResponsesClient
+from dqagent.runtime import AgentRuntime, RetryPolicy
 
 EXIT_COMMANDS = {"/exit", "/quit"}
 
@@ -21,6 +22,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--system", help="Optional system prompt for this session.")
     parser.add_argument("--base-url", help="Override OPENAI_BASE_URL.")
     parser.add_argument("--timeout", type=float, help="Override DQAGENT_TIMEOUT_SECONDS.")
+    parser.add_argument(
+        "--run-timeout",
+        type=float,
+        help="Override DQAGENT_RUN_TIMEOUT_SECONDS.",
+    )
+    parser.add_argument(
+        "--max-model-attempts",
+        type=int,
+        help="Override DQAGENT_MAX_MODEL_ATTEMPTS.",
+    )
     return parser
 
 
@@ -32,6 +43,10 @@ def _settings_from_args(args: argparse.Namespace) -> Settings:
         environ["OPENAI_BASE_URL"] = args.base_url
     if args.timeout is not None:
         environ["DQAGENT_TIMEOUT_SECONDS"] = str(args.timeout)
+    if args.run_timeout is not None:
+        environ["DQAGENT_RUN_TIMEOUT_SECONDS"] = str(args.run_timeout)
+    if args.max_model_attempts is not None:
+        environ["DQAGENT_MAX_MODEL_ATTEMPTS"] = str(args.max_model_attempts)
     return Settings.from_env(environ)
 
 
@@ -61,9 +76,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         settings = _settings_from_args(args)
-        app = AgentApplication(
+        runtime = AgentRuntime(
             OpenAIResponsesClient(settings),
             create_builtin_tool_registry(),
+            default_timeout_seconds=settings.run_timeout_seconds,
+            retry_policy=RetryPolicy(max_attempts=settings.max_model_attempts),
+        )
+        app = AgentApplication(
+            runtime,
             system_prompt=args.system,
         )
 

@@ -3,6 +3,9 @@
 - Status: Accepted
 - Date: 2026-07-23
 
+Phase 3's ADR-0003 supersedes only the decision that `AgentApplication` owns the loop. The tool
+contract, loop semantics, and commit-after-success behavior remain accepted.
+
 ## Context
 
 Phase 2 needs model-selected application actions without adopting an agent framework. The design
@@ -30,8 +33,9 @@ exhaustion fail the run. Conversation history is committed only after a final an
 - Tool schemas are explicit and reviewable instead of inferred from Python signatures.
 - Unknown tools, invalid arguments, handler exceptions, and timeouts use stable error codes.
 - A timed-out synchronous handler runs in a worker thread that cannot be safely killed. The caller
-  returns a timeout observation, but the handler may continue in the background. Hard cancellation
-  requires the Phase 3 runtime to control an isolation boundary.
+  returns a timeout observation, but the handler may continue in the background. Phase 3 adds
+  cooperative cancellation and a run deadline; hard cancellation still requires a process,
+  container, or remote-worker isolation boundary.
 - Conversation rollback cannot undo external side effects from tools that already ran. Tools that
   mutate state still need idempotency keys or transactional safeguards at their own boundary.
 - Semantic repeated-call rejection is intentionally conservative. Polling and other legitimate
@@ -59,5 +63,5 @@ later roadmap phases.
 ### Force-stop timed-out handlers
 
 Rejected because Python threads cannot be safely terminated. Per-call processes would provide a
-stronger boundary but impose serialization and lifecycle constraints that belong in the runtime
-phase.
+stronger boundary but impose serialization and lifecycle constraints beyond the local synchronous
+runtime introduced in Phase 3.

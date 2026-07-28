@@ -4,8 +4,8 @@ DQAgent is an engineering-first learning project for building AI Agent capabilit
 from foundational components. Its purpose is to understand the design of production-oriented agent
 systems instead of treating frameworks as black boxes.
 
-**Status:** Pre-alpha. Phase 2 is implemented: a provider-neutral, bounded tool-using agent loop
-backed by the OpenAI Responses API.
+**Status:** Pre-alpha. Phase 3 is implemented: a provider-neutral tool-using agent with an observable,
+bounded runtime backed by the OpenAI Responses API.
 
 ## Goals
 
@@ -22,7 +22,7 @@ backed by the OpenAI Responses API.
 - Present experimental code as a production-ready Agent platform.
 - Add abstractions for roadmap stages that have not been implemented.
 
-## Phase 2 Capabilities
+## Phase 3 Capabilities
 
 - Interactive and one-shot command-line chat.
 - In-memory conversation history with optional system prompts.
@@ -32,11 +32,15 @@ backed by the OpenAI Responses API.
 - A bounded model/tool/observation loop with repeated-call protection.
 - Structured recovery observations for invalid arguments, unknown tools, timeouts, and tool errors.
 - A built-in `current_time` tool that accepts a numeric UTC offset.
+- Per-run IDs, metadata, deadlines, and cooperative cancellation.
+- Ordered lifecycle, model-attempt, retry, and tool-call events.
+- Classified provider failures with bounded retry of transient model requests.
+- Event sinks for tracing, metrics, and audit adapters.
 - Environment-based configuration with explicit validation.
 - Unit tests, Ruff linting, mypy strict type checking, and GitHub Actions CI.
 
-Streaming, persistence, retries, hard cancellation, approval gates, and production observability are
-intentionally deferred to later phases.
+Streaming, persistence, hard execution isolation, approval gates, durable telemetry delivery, and
+workflow orchestration are intentionally deferred to later phases.
 
 ## Installation
 
@@ -66,7 +70,9 @@ export DQAGENT_MODEL="your-model-id"
 ```
 
 For an OpenAI-compatible endpoint, optionally set `OPENAI_BASE_URL`. Request timeout defaults to 60
-seconds and can be changed with `DQAGENT_TIMEOUT_SECONDS`.
+seconds and can be changed with `DQAGENT_TIMEOUT_SECONDS`. A complete agent run defaults to 120
+seconds and three model attempts; configure these with `DQAGENT_RUN_TIMEOUT_SECONDS` and
+`DQAGENT_MAX_MODEL_ATTEMPTS`.
 
 ## Usage
 
@@ -95,6 +101,8 @@ Useful interactive commands:
 
 ```text
 src/dqagent/       Application and provider code
+src/dqagent/runtime.py Observable agent runtime and retry policy
+src/dqagent/execution.py Run identity, deadline, and cancellation context
 tests/             Automated tests
 docs/roadmap.md    Authoritative development plan
 docs/architecture.md Current implemented architecture
