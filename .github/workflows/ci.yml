@@ -21,3 +21,17 @@ jobs:
         run: mypy src
       - name: Test
         run: pytest
+
+      - name: Deterministic evaluation
+        run: |
+          dqagent-eval \
+            --mode deterministic \
+            --output evaluation-report.json
+
+      - name: Upload evaluation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deterministic-evaluation-report
+          path: evaluation-report.json
+          retention-days: 30

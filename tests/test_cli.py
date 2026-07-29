@@ -39,6 +39,7 @@ def test_interactive_chat_handles_messages_reset_and_exit(
 def test_main_reports_missing_configuration(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    monkeypatch.setattr(cli, "load_dotenv", lambda: None)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("DQAGENT_MODEL", raising=False)
 
@@ -48,3 +49,22 @@ def test_main_reports_missing_configuration(
     error = capsys.readouterr().err
     assert "OPENAI_API_KEY" in error
     assert "DQAGENT_MODEL" in error
+
+
+def test_cli_arguments_select_llama_cpp_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    args = cli.build_parser().parse_args(
+        [
+            "--provider",
+            "llama_cpp",
+            "--model",
+            "local-model",
+            "--base-url",
+            "http://localhost:9000/v1",
+        ]
+    )
+
+    settings = cli._settings_from_args(args)
+
+    assert settings.provider.value == "llama_cpp"
+    assert settings.base_url == "http://localhost:9000/v1"

@@ -1,0 +1,187 @@
+{
+  "schema_version": 1,
+  "suite_id": "phase-3-baseline",
+  "cases": [
+    {
+      "id": "exact_direct_answer",
+      "modes": ["deterministic", "live"],
+      "input": {
+        "system_prompt": "Follow exact output-format instructions.",
+        "user_message": "Reply with exactly EVALUATION_OK and nothing else."
+      },
+      "fixture": {
+        "completions": [
+          {
+            "content": "EVALUATION_OK",
+            "response_id": "fixture-direct-1",
+            "model": "scripted",
+            "usage": {"input_tokens": 8, "output_tokens": 2, "total_tokens": 10}
+          }
+        ]
+      },
+      "expected": {
+        "answer": {"non_empty": true, "exact": "EVALUATION_OK"},
+        "tool_calls": [],
+        "trace": {
+          "required_event_types": [
+            "run_started",
+            "model_request_started",
+            "model_request_completed",
+            "run_completed"
+          ],
+          "max_model_attempts": 1,
+          "resource_limits": {
+            "deterministic": {"max_elapsed_seconds": 5, "max_total_tokens": 1000},
+            "live": {"max_elapsed_seconds": 30, "max_total_tokens": 1000}
+          }
+        }
+      }
+    },
+    {
+      "id": "current_time_tool",
+      "modes": ["deterministic", "live"],
+      "input": {
+        "user_message": "Use current_time with UTC offset +8, then report that local time."
+      },
+      "fixture": {
+        "completions": [
+          {
+            "tool_calls": [
+              {
+                "call_id": "fixture-time-1",
+                "name": "current_time",
+                "arguments": {"utc_offset_hours": 8}
+              }
+            ],
+            "response_id": "fixture-time-response-1",
+            "model": "scripted",
+            "usage": {"input_tokens": 20, "output_tokens": 5, "total_tokens": 25}
+          },
+          {
+            "content": "The current time was retrieved successfully.",
+            "response_id": "fixture-time-response-2",
+            "model": "scripted",
+            "usage": {"input_tokens": 25, "output_tokens": 8, "total_tokens": 33}
+          }
+        ]
+      },
+      "expected": {
+        "answer": {"non_empty": true},
+        "tool_calls": [
+          {
+            "name": "current_time",
+            "arguments": {"utc_offset_hours": 8},
+            "outcome": "success"
+          }
+        ],
+        "trace": {
+          "required_event_types": [
+            "run_started",
+            "model_request_started",
+            "model_request_completed",
+            "tool_call_started",
+            "tool_call_completed",
+            "model_request_started",
+            "model_request_completed",
+            "run_completed"
+          ],
+          "max_model_attempts": 2,
+          "resource_limits": {
+            "deterministic": {"max_elapsed_seconds": 5, "max_total_tokens": 1000},
+            "live": {"max_elapsed_seconds": 120, "max_total_tokens": 2000}
+          }
+        }
+      }
+    },
+    {
+      "id": "no_unnecessary_tool",
+      "modes": ["deterministic", "live"],
+      "input": {
+        "user_message": "In one sentence, contrast an agent loop with a deterministic workflow."
+      },
+      "fixture": {
+        "completions": [
+          {
+            "content": "An agent loop delegates decisions to a model, while a workflow owns explicit control flow.",
+            "response_id": "fixture-no-tool-1",
+            "model": "scripted",
+            "usage": {"input_tokens": 16, "output_tokens": 17, "total_tokens": 33}
+          }
+        ]
+      },
+      "expected": {
+        "answer": {"non_empty": true, "contains_all": ["agent", "workflow"]},
+        "tool_calls": [],
+        "trace": {
+          "required_event_types": [
+            "run_started",
+            "model_request_started",
+            "model_request_completed",
+            "run_completed"
+          ],
+          "max_model_attempts": 1,
+          "resource_limits": {
+            "deterministic": {"max_elapsed_seconds": 5, "max_total_tokens": 1000},
+            "live": {"max_elapsed_seconds": 60, "max_total_tokens": 2000}
+          }
+        }
+      }
+    },
+    {
+      "id": "invalid_tool_arguments_recovery",
+      "modes": ["deterministic"],
+      "input": {
+        "user_message": "Exercise invalid current_time arguments and recover with a final answer."
+      },
+      "fixture": {
+        "completions": [
+          {
+            "tool_calls": [
+              {
+                "call_id": "fixture-invalid-1",
+                "name": "current_time",
+                "arguments": {"utc_offset_hours": 99}
+              }
+            ],
+            "response_id": "fixture-invalid-response-1",
+            "model": "scripted",
+            "usage": {"input_tokens": 14, "output_tokens": 5, "total_tokens": 19}
+          },
+          {
+            "content": "The requested UTC offset is invalid.",
+            "response_id": "fixture-invalid-response-2",
+            "model": "scripted",
+            "usage": {"input_tokens": 24, "output_tokens": 7, "total_tokens": 31}
+          }
+        ]
+      },
+      "expected": {
+        "answer": {"non_empty": true, "contains_all": ["invalid"]},
+        "tool_calls": [
+          {
+            "name": "current_time",
+            "arguments": {"utc_offset_hours": 99},
+            "outcome": "error",
+            "error_code": "invalid_arguments"
+          }
+        ],
+        "trace": {
+          "required_event_types": [
+            "run_started",
+            "model_request_started",
+            "model_request_completed",
+            "tool_call_started",
+            "tool_call_completed",
+            "model_request_started",
+            "model_request_completed",
+            "run_completed"
+          ],
+          "max_model_attempts": 2,
+          "resource_limits": {
+            "deterministic": {"max_elapsed_seconds": 5, "max_total_tokens": 1000}
+          }
+        }
+      }
+    }
+  ]
+}

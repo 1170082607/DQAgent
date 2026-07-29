@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dqagent"
-version = "0.3.0"
+version = "0.4.0"
 description = "An incremental, engineering-first AI Agent learning project."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -13,6 +13,7 @@ authors = [{ name = "DQAgent contributors" }]
 dependencies = [
     "jsonschema>=4.23,<5.0",
     "openai>=2.45.0,<3.0.0",
+    "python-dotenv>=1.0,<2.0",
 ]
 
 [project.optional-dependencies]
@@ -26,6 +27,7 @@ dev = [
 
 [project.scripts]
 dqagent = "dqagent.cli:main"
+dqagent-eval = "dqagent.evaluation_cli:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }

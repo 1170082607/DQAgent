@@ -3,14 +3,7 @@
 from collections.abc import Sequence
 from typing import Any
 
-from openai import (
-    APIConnectionError,
-    APITimeoutError,
-    InternalServerError,
-    OpenAI,
-    OpenAIError,
-    RateLimitError,
-)
+from openai import OpenAI, OpenAIError
 from openai.types.responses import (
     FunctionToolParam,
     ResponseInputItemParam,
@@ -18,7 +11,7 @@ from openai.types.responses import (
 )
 
 from dqagent.config import Settings
-from dqagent.errors import ErrorCategory, LLMProviderError
+from dqagent.errors import LLMProviderError
 from dqagent.execution import RunContext
 from dqagent.models import (
     Completion,
@@ -28,6 +21,7 @@ from dqagent.models import (
     ToolDefinition,
     ToolResult,
 )
+from dqagent.providers._openai_sdk import map_token_usage, translate_openai_sdk_error
 
 
 class OpenAIResponsesClient:
@@ -122,29 +116,17 @@ class OpenAIResponsesClient:
             tool_calls=tool_calls,
             response_id=getattr(response, "id", None),
             model=getattr(response, "model", None),
+            usage=map_token_usage(
+                getattr(response, "usage", None),
+                input_field="input_tokens",
+                output_field="output_tokens",
+                provider_label="OpenAI",
+            ),
         )
 
     @staticmethod
     def _translate_error(error: OpenAIError) -> LLMProviderError:
-        if isinstance(error, APITimeoutError):
-            return LLMProviderError(
-                f"OpenAI request timed out: {error}",
-                category=ErrorCategory.TIMEOUT,
-                retryable=True,
-            )
-        if isinstance(error, RateLimitError):
-            return LLMProviderError(
-                f"OpenAI rate limit exceeded: {error}",
-                category=ErrorCategory.RATE_LIMIT,
-                retryable=True,
-            )
-        if isinstance(error, (APIConnectionError, InternalServerError)):
-            return LLMProviderError(
-                f"OpenAI service unavailable: {error}",
-                category=ErrorCategory.UNAVAILABLE,
-                retryable=True,
-            )
-        return LLMProviderError(f"OpenAI request failed: {error}")
+        return translate_openai_sdk_error(error, provider_label="OpenAI")
 
     @staticmethod
     def _map_input(item: ConversationItem) -> ResponseInputItemParam:

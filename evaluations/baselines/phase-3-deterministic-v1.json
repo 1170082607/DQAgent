@@ -1,0 +1,254 @@
+{
+  "report_schema_version": 1,
+  "suite_id": "phase-3-baseline",
+  "suite_schema_version": 1,
+  "mode": "deterministic",
+  "generated_at": "2026-07-28T11:06:43.928471+00:00",
+  "summary": {
+    "passed": true,
+    "passed_cases": 4,
+    "failed_cases": 0,
+    "executed_cases": 4,
+    "skipped_cases": 0
+  },
+  "skipped_case_ids": [],
+  "results": [
+    {
+      "case_id": "exact_direct_answer",
+      "passed": true,
+      "run_id": "eval-deterministic-exact_direct_answer",
+      "run_state": "completed",
+      "output": "EVALUATION_OK",
+      "metrics": {
+        "elapsed_seconds": 6.030000076862052e-05,
+        "model_attempts": 1,
+        "tool_calls": 0,
+        "input_tokens": 8,
+        "output_tokens": 2,
+        "total_tokens": 10
+      },
+      "checks": [
+        {
+          "name": "answer.non_empty",
+          "passed": true,
+          "detail": "final answer is non-empty"
+        },
+        {
+          "name": "answer.exact",
+          "passed": true,
+          "detail": "expected 'EVALUATION_OK', got 'EVALUATION_OK'"
+        },
+        {
+          "name": "tools.count",
+          "passed": true,
+          "detail": "expected 0 tool calls, observed 0"
+        },
+        {
+          "name": "trace.required_event_types",
+          "passed": true,
+          "detail": "required event sequence observed"
+        },
+        {
+          "name": "trace.max_model_attempts",
+          "passed": true,
+          "detail": "observed 1, maximum 1"
+        },
+        {
+          "name": "trace.max_elapsed_seconds",
+          "passed": true,
+          "detail": "observed 0.000060s, maximum 5s"
+        },
+        {
+          "name": "usage.max_total_tokens",
+          "passed": true,
+          "detail": "observed 10, maximum 1000"
+        },
+        {
+          "name": "fixture.completions_consumed",
+          "passed": true,
+          "detail": "all scripted completions consumed"
+        }
+      ],
+      "error": null
+    },
+    {
+      "case_id": "current_time_tool",
+      "passed": true,
+      "run_id": "eval-deterministic-current_time_tool",
+      "run_state": "completed",
+      "output": "The current time was retrieved successfully.",
+      "metrics": {
+        "elapsed_seconds": 0.018742899999779183,
+        "model_attempts": 2,
+        "tool_calls": 1,
+        "input_tokens": 45,
+        "output_tokens": 13,
+        "total_tokens": 58
+      },
+      "checks": [
+        {
+          "name": "answer.non_empty",
+          "passed": true,
+          "detail": "final answer is non-empty"
+        },
+        {
+          "name": "tools.count",
+          "passed": true,
+          "detail": "expected 1 tool calls, observed 1"
+        },
+        {
+          "name": "tools.call[0]",
+          "passed": true,
+          "detail": "expected current_time {'utc_offset_hours': 8}, got current_time {'utc_offset_hours': 8}"
+        },
+        {
+          "name": "trace.required_event_types",
+          "passed": true,
+          "detail": "required event sequence observed"
+        },
+        {
+          "name": "trace.max_model_attempts",
+          "passed": true,
+          "detail": "observed 2, maximum 2"
+        },
+        {
+          "name": "trace.max_elapsed_seconds",
+          "passed": true,
+          "detail": "observed 0.018743s, maximum 5s"
+        },
+        {
+          "name": "usage.max_total_tokens",
+          "passed": true,
+          "detail": "observed 58, maximum 1000"
+        },
+        {
+          "name": "fixture.completions_consumed",
+          "passed": true,
+          "detail": "all scripted completions consumed"
+        }
+      ],
+      "error": null
+    },
+    {
+      "case_id": "no_unnecessary_tool",
+      "passed": true,
+      "run_id": "eval-deterministic-no_unnecessary_tool",
+      "run_state": "completed",
+      "output": "An agent loop delegates decisions to a model, while a workflow owns explicit control flow.",
+      "metrics": {
+        "elapsed_seconds": 2.4600001779617742e-05,
+        "model_attempts": 1,
+        "tool_calls": 0,
+        "input_tokens": 16,
+        "output_tokens": 17,
+        "total_tokens": 33
+      },
+      "checks": [
+        {
+          "name": "answer.non_empty",
+          "passed": true,
+          "detail": "final answer is non-empty"
+        },
+        {
+          "name": "answer.contains_all",
+          "passed": true,
+          "detail": "all required fragments found"
+        },
+        {
+          "name": "tools.count",
+          "passed": true,
+          "detail": "expected 0 tool calls, observed 0"
+        },
+        {
+          "name": "trace.required_event_types",
+          "passed": true,
+          "detail": "required event sequence observed"
+        },
+        {
+          "name": "trace.max_model_attempts",
+          "passed": true,
+          "detail": "observed 1, maximum 1"
+        },
+        {
+          "name": "trace.max_elapsed_seconds",
+          "passed": true,
+          "detail": "observed 0.000025s, maximum 5s"
+        },
+        {
+          "name": "usage.max_total_tokens",
+          "passed": true,
+          "detail": "observed 33, maximum 1000"
+        },
+        {
+          "name": "fixture.completions_consumed",
+          "passed": true,
+          "detail": "all scripted completions consumed"
+        }
+      ],
+      "error": null
+    },
+    {
+      "case_id": "invalid_tool_arguments_recovery",
+      "passed": true,
+      "run_id": "eval-deterministic-invalid_tool_arguments_recovery",
+      "run_state": "completed",
+      "output": "The requested UTC offset is invalid.",
+      "metrics": {
+        "elapsed_seconds": 0.0001534000002720859,
+        "model_attempts": 2,
+        "tool_calls": 1,
+        "input_tokens": 38,
+        "output_tokens": 12,
+        "total_tokens": 50
+      },
+      "checks": [
+        {
+          "name": "answer.non_empty",
+          "passed": true,
+          "detail": "final answer is non-empty"
+        },
+        {
+          "name": "answer.contains_all",
+          "passed": true,
+          "detail": "all required fragments found"
+        },
+        {
+          "name": "tools.count",
+          "passed": true,
+          "detail": "expected 1 tool calls, observed 1"
+        },
+        {
+          "name": "tools.call[0]",
+          "passed": true,
+          "detail": "expected current_time {'utc_offset_hours': 99}, got current_time {'utc_offset_hours': 99}"
+        },
+        {
+          "name": "trace.required_event_types",
+          "passed": true,
+          "detail": "required event sequence observed"
+        },
+        {
+          "name": "trace.max_model_attempts",
+          "passed": true,
+          "detail": "observed 2, maximum 2"
+        },
+        {
+          "name": "trace.max_elapsed_seconds",
+          "passed": true,
+          "detail": "observed 0.000153s, maximum 5s"
+        },
+        {
+          "name": "usage.max_total_tokens",
+          "passed": true,
+          "detail": "observed 50, maximum 1000"
+        },
+        {
+          "name": "fixture.completions_consumed",
+          "passed": true,
+          "detail": "all scripted completions consumed"
+        }
+      ],
+      "error": null
+    }
+  ]
+}

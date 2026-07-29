@@ -9,7 +9,7 @@ from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass
 from typing import Protocol
 
-from jsonschema import Draft202012Validator
+from jsonschema import Draft202012Validator, FormatChecker
 from jsonschema.exceptions import SchemaError, ValidationError
 
 from dqagent.errors import RunCancelledError, RunDeadlineExceededError
@@ -99,7 +99,10 @@ class ToolRegistry:
             )
 
         try:
-            Draft202012Validator(tool.definition.input_schema).validate(arguments)
+            Draft202012Validator(
+                tool.definition.input_schema,
+                format_checker=FormatChecker(),
+            ).validate(arguments)
         except ValidationError as exc:
             return ToolExecution(
                 self._error(

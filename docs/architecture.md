@@ -2,7 +2,7 @@
 
 ## Status
 
-This document describes the implemented Phase 3 architecture. Workflow, persistence, hard execution
+This document describes the implemented Phase 4 architecture. Workflow, persistence, hard execution
 isolation, and other future capabilities remain in the [roadmap](roadmap.md).
 
 ## System Context
@@ -12,18 +12,29 @@ user turn to an observable runtime that calls an OpenAI model, executes applicat
 continues until it reaches a terminal state.
 
 ```text
-User -> CLI -> AgentApplication -> AgentRuntime -> LLMClient -> OpenAI Responses API
+User -> CLI -> AgentApplication -> AgentRuntime -> LLMClient -> provider adapter
+                                                            -> OpenAI Responses API
+                                                            -> llama-server Chat Completions API
                                       |
                                       +---------> ToolRegistry -> tool handler
                                       |
 RunContext ---------------------------+
                                       |
                                       +---------> EventSink adapters
+
+Versioned case -> EvaluationRunner -> AgentRuntime -> EvaluationReport
+                       |                   |
+                       +-> scripted LLM    +-> production tools and events
+                       +-> live LLM
 ```
 
 The CLI is the composition root. It creates the provider adapter, built-in tool registry, retry
 policy, runtime, and stateful application. `ChatApplication` remains a direct text-only use case and
 does not use the agent runtime.
+
+The evaluation CLI is a separate composition root. It loads versioned cases, selects either a
+scripted or live `LLMClient`, creates an isolated production runtime per case, and writes a structured
+report. Evaluation does not add a second agent loop.
 
 ## Responsibility Boundaries
 
@@ -36,8 +47,17 @@ provider retry, lifecycle transitions, and event emission. It does not persist c
 `RunContext` carries data and control signals shared by all work in one run: run ID, start time,
 deadline, cancellation, and read-only metadata.
 
-`ToolRegistry` validates untrusted model arguments and invokes context-aware handlers. The OpenAI
-adapter translates provider-neutral values and classifies SDK failures.
+`ToolRegistry` validates untrusted model arguments and invokes context-aware handlers. Provider
+adapters translate provider-neutral values and classify transport failures.
+
+The built-in registry exposes `current_time` and `get_weather`. `current_time` reads the local clock
+for a validated UTC offset. `get_weather` is a deterministic tool-calling demonstration: it validates
+a non-empty city and RFC 3339 full-date string, then returns structured fixed sunny data with an
+explicit demo marker and no network access. It is not a weather-provider adapter and its result is
+not a real forecast.
+
+`EvaluationRunner` owns case isolation and behavioral judgment. It consumes final output,
+conversation items, and runtime events; it does not alter runtime control flow or conversation state.
 
 This split is similar to separating a stateful application service from a request-scoped middleware
 and execution engine. The analogy is incomplete because the model can request more work, so the
@@ -159,11 +179,48 @@ not implied merely by having a runtime context.
 ## Provider-Neutral Conversation
 
 `dqagent.models` retains the Phase 2 neutral values: `Message`, `ToolDefinition`, `ToolCall`,
-`ToolResult`, and `Completion`. `LLMClient` now also accepts an optional `RunContext`. The OpenAI
-adapter alone maps these values to Responses API messages, function calls, function outputs, request
-timeouts, and SDK errors.
+`ToolResult`, and `Completion`. `LLMClient` also accepts an optional `RunContext`.
 
-Provider SDK types never enter the runtime, application, tool registry, or their tests.
+`OpenAIResponsesClient` maps these values to Responses API input items. `LlamaCppChatClient` maps
+them to llama-server's OpenAI-compatible Chat Completions messages. Chat Completions represents an
+assistant tool request and its observations differently, so the llama.cpp adapter groups adjacent
+assistant text and `ToolCall` items into one assistant `tool_calls` message, then emits each
+`ToolResult` as a tool message.
+
+Provider SDK types never enter the runtime, application, tool registry, or their tests. Both adapters
+use the OpenAI Python SDK for transport, but API compatibility is not treated as identical execution
+semantics: request and response mapping remains separate.
+
+When a provider exposes token counts, the adapter maps them to provider-neutral `TokenUsage` on the
+`Completion`. The runtime copies those counts into the corresponding `MODEL_REQUEST_COMPLETED`
+event. Absence remains `None`, so reports do not confuse unknown usage with zero usage.
+
+## Evaluation Harness
+
+Evaluation suites are JSON documents with a schema version, suite identity, and isolated cases. Each
+case defines input, eligible modes, expected answer predicates, exact ordered tool behavior, trace
+constraints, and deterministic completion fixtures when applicable.
+
+Deterministic mode replaces only the LLM boundary. It still runs the production `AgentRuntime`, tool
+registry, validation, recovery observations, and event emitter. CI uses this mode to catch regressions
+without credentials, network access, model drift, or cost. All scripted completions must be consumed,
+which makes premature termination visible.
+
+Live mode is explicit and uses `OpenAIResponsesClient`. Cases can opt out when their fixture tests a
+harness failure path that a real model should not be asked to reproduce. A live pass rate is a sample,
+not a deterministic build invariant; meaningful comparisons require repeated runs and fixed model,
+prompt, case, and environment identities.
+
+Version 1 evaluates:
+
+- Exact, non-empty, and case-insensitive final-answer properties.
+- Exact tool-call count and order, structural JSON arguments, outcomes, and stable error codes.
+- Required event-type subsequences and total model attempts, plus mode-specific elapsed-time and
+  token ceilings.
+- Raw per-case latency, attempts, tool calls, and provider-reported token counts in JSON reports.
+
+LLM-as-judge remains excluded because all current qualities have direct predicates. The harness is
+intentionally product-specific rather than a general benchmark framework.
 
 ## Dependency Rules
 
@@ -172,32 +229,44 @@ CLI -> AgentApplication -> AgentRuntime
 AgentRuntime -> RunContext + LLMClient + ToolRegistry + neutral models
 ToolRegistry -> RunContext + neutral models + jsonschema
 OpenAI adapter -> RunContext + neutral models + OpenAI SDK
+llama.cpp adapter -> RunContext + neutral models + OpenAI SDK transport
 Event adapters -> RunEvent (future concrete integrations)
+EvaluationRunner -> AgentRuntime + neutral models + RunEvent
 ```
 
 - Session state is owned above the runtime; one run cannot commit partial history.
 - Runtime and tool modules must not import provider SDKs.
 - Provider adapters translate wire data and classify infrastructure failures.
 - Event sinks observe execution but cannot mutate runtime state.
+- Evaluation observes production-owned results and events; it cannot implement alternate execution.
 - Workflow, persistence, and multi-agent modules are not introduced before their phases.
 
 ## Configuration
 
-`DQAGENT_TIMEOUT_SECONDS` bounds an individual OpenAI request. `DQAGENT_RUN_TIMEOUT_SECONDS` bounds
-one end-to-end agent run and defaults to 120 seconds. `DQAGENT_MAX_MODEL_ATTEMPTS` configures the
-runtime's model-attempt budget and defaults to three. All values are validated before composition.
+`DQAGENT_PROVIDER` selects `openai` or `llama_cpp`. `DQAGENT_MODEL` is required for both. OpenAI
+requires `OPENAI_API_KEY`; llama.cpp defaults to `http://127.0.0.1:8080/v1` and uses an optional
+`LLAMA_CPP_API_KEY`. `DQAGENT_BASE_URL` overrides either provider-specific URL.
+
+`DQAGENT_TIMEOUT_SECONDS` bounds an individual provider request. `DQAGENT_RUN_TIMEOUT_SECONDS`
+bounds one end-to-end agent run and defaults to 120 seconds. `DQAGENT_MAX_MODEL_ATTEMPTS` configures
+the runtime's model-attempt budget and defaults to three. All values are validated before composition.
 
 ## Testing Strategy
 
 - Runtime tests assert event order, run-ID propagation, retries, cancellation, deadlines, terminal
   classification, tool diagnostic isolation, and sink failure isolation.
 - Application tests assert complete-history commit and rollback on failed runs.
-- Tool tests cover validation, expected failures, soft timeout, and context-aware handlers.
-- Provider tests verify wire mapping, deadline-derived request timeout, and error classification.
+- Tool tests cover validation, expected failures, soft timeout, context-aware handlers, and the
+  externally visible contracts of both built-in tools.
+- Provider tests verify Responses and Chat Completions wire mapping, deadline-derived request timeout,
+  tool-history translation, usage extraction, and error classification.
+- Evaluation tests assert schema validation, mode isolation, predicates, metrics, report serialization,
+  and the committed Phase 3 deterministic case set.
 - CI runs Ruff, strict mypy, and pytest with at least 85% coverage.
+- CI also runs the credential-free deterministic behavioral suite after implementation tests.
 
-No live model test runs in CI because credentials, cost, and network nondeterminism make it an
-unsuitable correctness gate.
+No live model evaluation runs in CI because credentials, cost, provider drift, and network
+nondeterminism make it an unsuitable correctness gate.
 
 ## Current Limitations
 
@@ -207,12 +276,18 @@ unsuitable correctness gate.
 - Event sinks are best-effort and no concrete durable telemetry adapter is included.
 - Conversation history is process-local, unbounded, and non-streaming.
 - There are no approvals, checkpoints, persistence, or workflow orchestration.
-- Only OpenAI Responses is implemented as a provider adapter.
+- llama.cpp compatibility depends on the selected model's chat template and tool-calling support;
+  the adapter does not attempt to infer or rewrite incompatible templates.
+- The evaluation corpus is intentionally small, live mode runs once per case, and reports do not yet
+  aggregate repeated samples or compare against a prior report automatically.
+- Answer predicates are deterministic; there is no semantic or LLM-based judge.
 
 ## Related Material
 
 - [ADR-0001: Provider-Neutral LLM Boundary](adr/0001-provider-neutral-llm-boundary.md)
 - [ADR-0002: Explicit Tool Boundary and Bounded Agent Loop](adr/0002-explicit-tool-boundary-and-bounded-loop.md)
 - [ADR-0003: Observable Runtime and Cooperative Cancellation](adr/0003-observable-runtime-and-cooperative-cancellation.md)
+- [ADR-0004: Separate Evaluation Harness from Agent Execution](adr/0004-evaluation-harness-boundary.md)
 - [Phase 2 Framework Comparison](learning/phase-2-framework-comparison.md)
 - [Roadmap Reassessment After Phase 3](learning/roadmap-reassessment-after-phase-3.md)
+- [Phase 4 BFCL and GAIA Comparison](learning/phase-4-bfcl-gaia-comparison.md)

@@ -406,6 +406,15 @@ class AgentRuntime:
                     "response_id": completion.response_id,
                     "model": completion.model,
                     "tool_call_count": len(completion.tool_calls),
+                    "input_tokens": (
+                        completion.usage.input_tokens if completion.usage is not None else None
+                    ),
+                    "output_tokens": (
+                        completion.usage.output_tokens if completion.usage is not None else None
+                    ),
+                    "total_tokens": (
+                        completion.usage.total_tokens if completion.usage is not None else None
+                    ),
                 },
             )
             return completion

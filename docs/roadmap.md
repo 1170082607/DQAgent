@@ -127,18 +127,18 @@ remain later production concerns.
 
 ### Phase 4: Evaluation Foundation
 
-**Status:** Next
+**Status:** Complete
 
 **Outcome:** Make agent behavior measurable before adding more behavior.
 
-- Define versioned evaluation cases with inputs, fixtures, expected outcomes, and trace constraints.
-- Evaluate final-answer properties, tool selection and arguments, trajectory invariants, latency,
+- [x] Define versioned evaluation cases with inputs, fixtures, expected outcomes, and trace constraints.
+- [x] Evaluate final-answer properties, tool selection and arguments, trajectory invariants, latency,
   attempts, and token usage where the provider exposes it.
-- Keep deterministic runtime tests separate from probabilistic model evaluations.
-- Add a deterministic evaluation mode for CI and an explicit, credentialed live-model mode for
+- [x] Keep deterministic runtime tests separate from probabilistic model evaluations.
+- [x] Add a deterministic evaluation mode for CI and an explicit, credentialed live-model mode for
   local runs.
-- Produce a baseline report for the Phase 3 agent and make regressions visible.
-- Study BFCL and GAIA evaluation semantics without making a large benchmark suite a runtime
+- [x] Produce a baseline report for the Phase 3 agent and make regressions visible.
+- [x] Study BFCL and GAIA evaluation semantics without making a large benchmark suite a runtime
   dependency.
 
 The first evaluators should be deterministic predicates and structured trace checks. LLM-as-judge
@@ -147,7 +147,7 @@ known limitations documented.
 
 ### Phase 5: Workflow and Durable Execution
 
-**Status:** Planned
+**Status:** Next
 
 **Outcome:** Orchestrate deterministic multi-step work with explicit state and recovery.
 

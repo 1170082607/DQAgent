@@ -92,11 +92,30 @@ ConversationItem: TypeAlias = Message | ToolCall | ToolResult
 
 
 @dataclass(frozen=True, slots=True)
+class TokenUsage:
+    """Provider-neutral token counts for one model response."""
+
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("input tokens", self.input_tokens),
+            ("output tokens", self.output_tokens),
+            ("total tokens", self.total_tokens),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"{name} must be a non-negative integer")
+
+
+@dataclass(frozen=True, slots=True)
 class Completion:
     content: str | None = None
     tool_calls: tuple[ToolCall, ...] = ()
     response_id: str | None = None
     model: str | None = None
+    usage: TokenUsage | None = None
 
     def __post_init__(self) -> None:
         if self.content is not None and not self.content.strip():

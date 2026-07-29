@@ -19,6 +19,7 @@ from dqagent.models import (
     Completion,
     Message,
     Role,
+    TokenUsage,
     ToolCall,
     ToolDefinition,
     ToolErrorCode,
@@ -110,6 +111,25 @@ def test_complete_maps_messages_and_response() -> None:
             ],
         }
     ]
+
+
+def test_complete_maps_token_usage() -> None:
+    usage = SimpleNamespace(input_tokens=11, output_tokens=7, total_tokens=18)
+    sdk = FakeOpenAI(SimpleNamespace(output_text="Hello", output=[], usage=usage))
+
+    completion = OpenAIResponsesClient(make_settings(), client=sdk).complete(
+        [Message(Role.USER, "Hi")]
+    )
+
+    assert completion.usage == TokenUsage(11, 7, 18)
+
+
+def test_complete_rejects_invalid_token_usage() -> None:
+    usage = SimpleNamespace(input_tokens=11, output_tokens="seven", total_tokens=18)
+    sdk = FakeOpenAI(SimpleNamespace(output_text="Hello", output=[], usage=usage))
+
+    with pytest.raises(LLMProviderError, match="invalid token usage"):
+        OpenAIResponsesClient(make_settings(), client=sdk).complete([Message(Role.USER, "Hi")])
 
 
 def test_complete_rejects_response_without_text_or_tool_calls() -> None:

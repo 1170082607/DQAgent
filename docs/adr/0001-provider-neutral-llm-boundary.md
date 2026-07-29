@@ -21,14 +21,19 @@ results; Phase 3 propagated deadlines and cancellation through the same boundary
 the dependency direction.
 
 The first adapter uses the OpenAI Python SDK and the Responses API. Request mapping, SDK exceptions,
-and response extraction remain inside `OpenAIResponsesClient`. The CLI acts as the composition root
-that wires the adapter into the application.
+and response extraction remain inside `OpenAIResponsesClient`. A second adapter uses the same SDK as
+an HTTP transport for llama.cpp's OpenAI-compatible Chat Completions endpoint. It owns the different
+message/tool protocol in `LlamaCppChatClient`; OpenAI-specific wire values still do not cross the
+`LLMClient` boundary. The CLI acts as the composition root and selects an adapter from explicit
+configuration.
 
 ## Consequences
 
 - Application tests can use small fakes without mocking the OpenAI SDK.
 - Provider-specific types cannot become application-layer contracts accidentally.
 - A second provider can be evaluated against an existing behavioral boundary.
+- Provider selection is explicit. Local llama.cpp does not require OpenAI credentials, but its model
+  and chat template must implement the tool-calling protocol used by the agent.
 - The abstraction must remain small; provider-specific capabilities may require explicit extension
   instead of forcing all providers into a lowest-common-denominator interface.
 - Phase 1 contains one interface with one implementation. It is justified by an external system

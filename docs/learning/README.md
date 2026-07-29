@@ -17,3 +17,4 @@ to an ADR when it becomes a durable project decision.
 
 - [Phase 2 Comparison: DQAgent, OpenAI Agents SDK, and EINO](phase-2-framework-comparison.md)
 - [Roadmap Reassessment After Phase 3](roadmap-reassessment-after-phase-3.md)
+- [Phase 4 Comparison: DQAgent, BFCL, and GAIA](phase-4-bfcl-gaia-comparison.md)

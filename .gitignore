@@ -56,3 +56,6 @@ junit.xml
 ._*
 Thumbs.db
 Desktop.ini
+
+# CI generated reports
+evaluation-report.json

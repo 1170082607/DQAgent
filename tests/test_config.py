@@ -1,9 +1,11 @@
 import pytest
 
 from dqagent.config import (
+    DEFAULT_LLAMA_CPP_BASE_URL,
     DEFAULT_MAX_MODEL_ATTEMPTS,
     DEFAULT_RUN_TIMEOUT_SECONDS,
     DEFAULT_TIMEOUT_SECONDS,
+    ModelProvider,
     Settings,
 )
 from dqagent.errors import ConfigurationError
@@ -39,6 +41,33 @@ def test_settings_use_default_timeout() -> None:
     assert settings.timeout_seconds == DEFAULT_TIMEOUT_SECONDS
     assert settings.run_timeout_seconds == DEFAULT_RUN_TIMEOUT_SECONDS
     assert settings.max_model_attempts == DEFAULT_MAX_MODEL_ATTEMPTS
+
+
+def test_settings_load_llama_cpp_without_openai_credentials() -> None:
+    settings = Settings.from_env(
+        {"DQAGENT_PROVIDER": "llama_cpp", "DQAGENT_MODEL": "local-model"}
+    )
+
+    assert settings.provider is ModelProvider.LLAMA_CPP
+    assert settings.api_key == "local"
+    assert settings.base_url == DEFAULT_LLAMA_CPP_BASE_URL
+
+
+def test_generic_base_url_overrides_provider_default() -> None:
+    settings = Settings.from_env(
+        {
+            "DQAGENT_PROVIDER": "llama_cpp",
+            "DQAGENT_MODEL": "local-model",
+            "DQAGENT_BASE_URL": "http://localhost:9000/v1",
+        }
+    )
+
+    assert settings.base_url == "http://localhost:9000/v1"
+
+
+def test_settings_reject_unknown_provider() -> None:
+    with pytest.raises(ConfigurationError, match="DQAGENT_PROVIDER"):
+        Settings.from_env({"DQAGENT_PROVIDER": "unknown", "DQAGENT_MODEL": "model"})
 
 
 def test_settings_report_all_missing_required_values() -> None:

@@ -5,22 +5,29 @@ import os
 import sys
 from collections.abc import Sequence
 
+from dotenv import load_dotenv
+
 from dqagent.application import AgentApplication, ChatApplication
 from dqagent.builtin_tools import create_builtin_tool_registry
-from dqagent.config import Settings
+from dqagent.config import ModelProvider, Settings
 from dqagent.errors import DQAgentError
-from dqagent.providers.openai import OpenAIResponsesClient
+from dqagent.providers import create_llm_client
 from dqagent.runtime import AgentRuntime, RetryPolicy
 
 EXIT_COMMANDS = {"/exit", "/quit"}
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run a tool-using OpenAI agent.")
+    parser = argparse.ArgumentParser(description="Run a tool-using agent.")
     parser.add_argument("-m", "--message", help="Send one message and exit.")
+    parser.add_argument(
+        "--provider",
+        choices=[provider.value for provider in ModelProvider],
+        help="Override DQAGENT_PROVIDER.",
+    )
     parser.add_argument("--model", help="Override DQAGENT_MODEL.")
     parser.add_argument("--system", help="Optional system prompt for this session.")
-    parser.add_argument("--base-url", help="Override OPENAI_BASE_URL.")
+    parser.add_argument("--base-url", help="Override the selected provider base URL.")
     parser.add_argument("--timeout", type=float, help="Override DQAGENT_TIMEOUT_SECONDS.")
     parser.add_argument(
         "--run-timeout",
@@ -37,10 +44,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _settings_from_args(args: argparse.Namespace) -> Settings:
     environ = dict(os.environ)
+    if args.provider:
+        environ["DQAGENT_PROVIDER"] = args.provider
     if args.model:
         environ["DQAGENT_MODEL"] = args.model
     if args.base_url:
-        environ["OPENAI_BASE_URL"] = args.base_url
+        environ["DQAGENT_BASE_URL"] = args.base_url
     if args.timeout is not None:
         environ["DQAGENT_TIMEOUT_SECONDS"] = str(args.timeout)
     if args.run_timeout is not None:
@@ -75,9 +84,10 @@ def _interactive_chat(app: ChatApplication | AgentApplication) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        load_dotenv()
         settings = _settings_from_args(args)
         runtime = AgentRuntime(
-            OpenAIResponsesClient(settings),
+            create_llm_client(settings),
             create_builtin_tool_registry(),
             default_timeout_seconds=settings.run_timeout_seconds,
             retry_policy=RetryPolicy(max_attempts=settings.max_model_attempts),

@@ -2,7 +2,7 @@
 
 from dqagent.application import AgentApplication, ChatApplication
 from dqagent.execution import RunContext
-from dqagent.models import Message, Role
+from dqagent.models import Message, Role, TokenUsage
 from dqagent.runtime import (
     AgentRunResult,
     AgentRuntime,
@@ -20,6 +20,7 @@ __all__ = [
     "Message",
     "RetryPolicy",
     "Role",
+    "TokenUsage",
     "RunContext",
     "RunEvent",
     "RunEventType",
