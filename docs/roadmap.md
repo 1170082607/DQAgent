@@ -147,16 +147,16 @@ known limitations documented.
 
 ### Phase 5: Workflow and Durable Execution
 
-**Status:** Next
+**Status:** Complete
 
 **Outcome:** Orchestrate deterministic multi-step work with explicit state and recovery.
 
-- Define workflow state, nodes, transitions, terminal states, and validation rules.
-- Implement sequential and conditional execution before bounded parallel branches.
-- Specify branch merge, sibling cancellation, partial failure, and result ordering semantics.
-- Add checkpoint storage, interruption, resume, and replay/idempotency boundaries.
-- Reuse `RunContext` and runtime events instead of creating a second lifecycle model.
-- Compare the implementation with LangGraph persistence/interrupts and EINO graph execution.
+- [x] Define workflow state, nodes, transitions, terminal states, and validation rules.
+- [x] Implement sequential and conditional execution before bounded parallel branches.
+- [x] Specify branch merge, sibling cancellation, partial failure, and result ordering semantics.
+- [x] Add checkpoint storage, interruption, resume, and replay/idempotency boundaries.
+- [x] Reuse `RunContext` and runtime events instead of creating a second lifecycle model.
+- [x] Compare the implementation with LangGraph persistence/interrupts and EINO graph execution.
 
 A workflow is a deterministic orchestration mechanism, not a substitute for model agency. Model
 decisions remain inside agent nodes; the graph owns known control flow, durable progress, and human
@@ -164,7 +164,7 @@ or system interrupts.
 
 ### Phase 6: Context Engineering and Sessions
 
-**Status:** Planned
+**Status:** Next
 
 **Outcome:** Keep long-running model context relevant, bounded, and recoverable.
 

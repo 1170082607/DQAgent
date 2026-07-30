@@ -81,3 +81,37 @@ def test_context_rejects_invalid_cancel_and_wait_values() -> None:
         context.cancel(" ")
     with pytest.raises(ValueError, match="delay"):
         context.wait(-1)
+
+
+def test_child_context_inherits_parent_cancellation_but_can_cancel_independently() -> None:
+    parent = RunContext(run_id="run-parent", metadata={"scope": "workflow"})
+    child = parent.child(metadata={"branch": "left"})
+
+    assert child.run_id == parent.run_id
+    assert child.metadata == {"scope": "workflow", "branch": "left"}
+    assert child.cancel("stop branch") is True
+    assert parent.is_cancelled is False
+
+    active_child = parent.child()
+    parent.cancel("stop workflow")
+
+    with pytest.raises(RunCancelledError, match="stop workflow"):
+        active_child.check_active()
+
+
+def test_parent_cancellation_interrupts_child_wait() -> None:
+    parent = RunContext(run_id="run-parent-wait")
+    child = parent.child()
+    timer = Timer(0.01, parent.cancel, args=("stop child wait",))
+    started = time.monotonic()
+    timer.start()
+
+    try:
+        with pytest.raises(RunCancelledError, match="stop child wait"):
+            child.wait(1)
+    finally:
+        timer.join()
+
+    assert child.is_cancelled is True
+    assert child.cancel_reason == "stop child wait"
+    assert time.monotonic() - started < 0.5

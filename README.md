@@ -4,9 +4,9 @@ DQAgent is an engineering-first learning project for building AI Agent capabilit
 from foundational components. Its purpose is to understand the design of production-oriented agent
 systems instead of treating frameworks as black boxes.
 
-**Status:** Pre-alpha. Phase 4 is implemented: the provider-neutral, observable Phase 3 agent now has
-a versioned behavioral evaluation harness with deterministic CI and explicit live-model modes.
-Phase 5 will add deterministic workflow and durable execution semantics.
+**Status:** Pre-alpha. Phase 5 is implemented: DQAgent now supports validated deterministic workflows,
+bounded parallel branches, durable checkpoints, interruption, resume, and replay. Phase 6 will add
+context engineering and durable sessions.
 
 ## Goals
 
@@ -26,7 +26,7 @@ Phase 5 will add deterministic workflow and durable execution semantics.
 - Add abstractions for roadmap stages that have not been implemented.
 - Treat workflow graphs, prompt chains, or additional agents as substitutes for model capability.
 
-## Phase 4 Capabilities
+## Phase 5 Capabilities
 
 - Interactive and one-shot command-line chat.
 - In-memory conversation history with optional system prompts.
@@ -46,12 +46,21 @@ Phase 5 will add deterministic workflow and durable execution semantics.
 - Per-case latency, model-attempt, tool-call, and provider-reported token metrics.
 - Credential-free deterministic evaluation for CI and explicit, credentialed live-model evaluation.
 - A committed Phase 3 behavioral baseline and BFCL/GAIA evaluation comparison.
+- Validated acyclic workflow definitions with sequential and conditional transitions.
+- Bounded parallel leaf branches with disjoint-key merge and cooperative sibling cancellation.
+- Explicit running, interrupted, completed, failed, cancelled, and timed-out workflow states.
+- Compare-and-swap checkpoints backed by memory or atomic local JSON files.
+- Resume from the last uncompleted node and replay from original input under a new workflow ID.
+- Stable node idempotency keys for external side-effect deduplication.
+- Shared `RunContext`, lifecycle events, deadlines, cancellation, and event sinks across agent and
+  workflow runtimes.
 - Environment-based configuration with explicit validation.
 - Unit tests, Ruff linting, mypy strict type checking, and GitHub Actions CI.
 
-Streaming, persistence, hard execution isolation, approval gates, durable telemetry delivery,
-LLM-as-judge, repeated live-model sampling, and workflow orchestration are intentionally deferred.
-Evaluation, security, and observability now remain continuous constraints for later phases.
+Streaming, durable sessions, context compaction, hard execution isolation, approval policy,
+distributed workflow leases, durable telemetry delivery, LLM-as-judge, and repeated live-model
+sampling remain deferred. Evaluation, security, durability, and observability remain continuous
+constraints for later phases.
 
 ## Installation
 
@@ -151,6 +160,18 @@ Deterministic evaluation proves the harness and evaluators are stable; it does n
 quality. Live reports are model samples and should be repeated before drawing regression conclusions.
 See [evaluations/README.md](evaluations/README.md) for the case contract and report semantics.
 
+Run the durable workflow example. The first process checkpoints and interrupts after `prepare`; the
+second claims the checkpoint and continues from `apply`:
+
+```bash
+python examples/workflow_resume.py start demo-1
+python examples/workflow_resume.py resume demo-1
+```
+
+Workflow checkpoints provide at-least-once recovery. A node that performs external side effects must
+pass `context.metadata["idempotency_key"]` to a system that can deduplicate retries. Checkpointing
+cannot guarantee exactly-once effects across a process crash.
+
 Useful interactive commands:
 
 - `/reset`: clear conversation history while preserving the system prompt.
@@ -162,7 +183,10 @@ Useful interactive commands:
 src/dqagent/       Application and provider code
 src/dqagent/runtime.py Observable agent runtime and retry policy
 src/dqagent/execution.py Run identity, deadline, and cancellation context
+src/dqagent/events.py Shared agent/workflow lifecycle events
 src/dqagent/evaluation.py Behavioral case loader, runner, checks, and reports
+src/dqagent/workflow.py Deterministic workflow definition and runner
+src/dqagent/checkpoint.py Workflow checkpoint contract and stores
 evaluations/        Versioned cases and committed baseline reports
 tests/             Automated tests
 docs/roadmap.md    Authoritative development plan

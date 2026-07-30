@@ -26,3 +26,4 @@ Start from [0000-template.md](0000-template.md).
 - [ADR-0002: Explicit Tool Boundary and Bounded Agent Loop](0002-explicit-tool-boundary-and-bounded-loop.md)
 - [ADR-0003: Observable Runtime and Cooperative Cancellation](0003-observable-runtime-and-cooperative-cancellation.md)
 - [ADR-0004: Separate Evaluation Harness from Agent Execution](0004-evaluation-harness-boundary.md)
+- [ADR-0005: Checkpoint Deterministic Workflow Progress at Node Boundaries](0005-checkpointed-deterministic-workflow.md)

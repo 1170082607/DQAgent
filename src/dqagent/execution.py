@@ -20,6 +20,7 @@ class RunContext:
         run_id: str | None = None,
         timeout_seconds: float | None = None,
         metadata: Mapping[str, object] | None = None,
+        _parent: "RunContext | None" = None,
     ) -> None:
         resolved_run_id = str(uuid4()) if run_id is None else run_id
         if not resolved_run_id.strip():
@@ -37,6 +38,7 @@ class RunContext:
             else None
         )
         self.metadata: Mapping[str, object] = MappingProxyType(dict(metadata or {}))
+        self._parent = _parent
         self._started_monotonic = time.monotonic()
         self._deadline_monotonic = (
             self._started_monotonic + timeout_seconds
@@ -59,11 +61,15 @@ class RunContext:
 
     @property
     def is_cancelled(self) -> bool:
-        return self._cancelled.is_set()
+        return self._cancelled.is_set() or (
+            self._parent is not None and self._parent.is_cancelled
+        )
 
     @property
     def cancel_reason(self) -> str | None:
-        return self._cancel_reason
+        if self._cancel_reason is not None:
+            return self._cancel_reason
+        return self._parent.cancel_reason if self._parent is not None else None
 
     def cancel(self, reason: str = "run cancelled") -> bool:
         """Request cancellation and return whether this call won the race."""
@@ -78,6 +84,8 @@ class RunContext:
             return True
 
     def check_active(self) -> None:
+        if self._parent is not None:
+            self._parent.check_active()
         if self._cancelled.is_set():
             raise RunCancelledError(
                 self._cancel_reason or "run cancelled",
@@ -106,4 +114,17 @@ class RunContext:
                 if run_remaining is None
                 else min(delay_remaining, run_remaining)
             )
+            if self._parent is not None:
+                wait_seconds = min(wait_seconds, 0.05)
             self._cancelled.wait(wait_seconds)
+
+    def child(self, *, metadata: Mapping[str, object] | None = None) -> "RunContext":
+        """Create an independently cancellable context bounded by this context."""
+        self.check_active()
+        merged_metadata = {**self.metadata, **dict(metadata or {})}
+        return RunContext(
+            run_id=self.run_id,
+            timeout_seconds=self.remaining_seconds,
+            metadata=merged_metadata,
+            _parent=self,
+        )

@@ -67,3 +67,23 @@ class RunDeadlineExceededError(DQAgentError):
 
 class AgentRuntimeError(DQAgentError):
     """Raised when an unexpected failure escapes a runtime boundary."""
+
+
+class WorkflowDefinitionError(DQAgentError):
+    """Raised when a workflow graph violates a structural invariant."""
+
+    category = ErrorCategory.CONFIGURATION
+
+
+class WorkflowExecutionError(DQAgentError):
+    """Raised when a workflow node or transition cannot complete."""
+
+
+class CheckpointError(DQAgentError):
+    """Raised when durable workflow state cannot be loaded or saved."""
+
+    category = ErrorCategory.UNAVAILABLE
+
+
+class CheckpointConflictError(CheckpointError):
+    """Raised when a stale workflow owner attempts to overwrite a checkpoint."""

@@ -2,14 +2,14 @@
 
 ## Status
 
-This document describes the implemented Phase 4 architecture. Workflow, persistence, hard execution
-isolation, and other future capabilities remain in the [roadmap](roadmap.md).
+This document describes the implemented Phase 5 architecture. Durable sessions, context engineering,
+hard execution isolation, and other future capabilities remain in the [roadmap](roadmap.md).
 
 ## System Context
 
 DQAgent is a local command-line agent. It maintains in-memory conversation state and delegates each
-user turn to an observable runtime that calls an OpenAI model, executes application-owned tools, and
-continues until it reaches a terminal state.
+user turn to an observable runtime that calls a configured model, executes application-owned tools,
+and continues until it reaches a terminal state.
 
 ```text
 User -> CLI -> AgentApplication -> AgentRuntime -> LLMClient -> provider adapter
@@ -26,6 +26,11 @@ Versioned case -> EvaluationRunner -> AgentRuntime -> EvaluationReport
                        |                   |
                        +-> scripted LLM    +-> production tools and events
                        +-> live LLM
+
+Workflow input -> WorkflowRunner -> validated node graph -> WorkflowRunResult
+                        |                   |
+                        +-> CheckpointStore +-> sequential / conditional / parallel nodes
+                        +-> RunContext + shared lifecycle events
 ```
 
 The CLI is the composition root. It creates the provider adapter, built-in tool registry, retry
@@ -35,6 +40,10 @@ does not use the agent runtime.
 The evaluation CLI is a separate composition root. It loads versioned cases, selects either a
 scripted or live `LLMClient`, creates an isolated production runtime per case, and writes a structured
 report. Evaluation does not add a second agent loop.
+
+Workflow definitions are application composition. `WorkflowRunner` executes known control flow and
+persists progress through a `CheckpointStore`; an agent runtime may be called inside a node when a
+step genuinely needs model decisions, but workflow transitions remain deterministic.
 
 ## Responsibility Boundaries
 
@@ -58,6 +67,10 @@ not a real forecast.
 
 `EvaluationRunner` owns case isolation and behavioral judgment. It consumes final output,
 conversation items, and runtime events; it does not alter runtime control flow or conversation state.
+
+`WorkflowRunner` owns graph traversal, node-boundary commits, conditional selection, bounded branch
+execution, interruption, recovery, and workflow events. `CheckpointStore` owns compare-and-swap
+persistence but does not execute nodes or infer retry safety.
 
 This split is similar to separating a stateful application service from a request-scoped middleware
 and execution engine. The analogy is incomplete because the model can request more work, so the
@@ -222,6 +235,34 @@ Version 1 evaluates:
 LLM-as-judge remains excluded because all current qualities have direct predicates. The harness is
 intentionally product-specific rather than a general benchmark framework.
 
+## Workflow and Durable Execution
+
+`WorkflowDefinition` is an acyclic graph of explicit `WorkflowNode` values. Every node has one end,
+next, conditional, or parallel transition. Construction rejects duplicate IDs, missing targets,
+cycles, unreachable nodes, and branch nodes that can be entered outside their parallel owner.
+
+Node handlers receive a defensive JSON state snapshot and a child `RunContext`. They return
+`NodeResult` updates rather than mutating shared state. A sequential node's updates and selected
+transition commit in one checkpoint. `NodeResult.interrupt` commits those updates, records the next
+node, and terminates the current run attempt as `interrupted`.
+
+Parallel branches are terminal leaf nodes and run from the same post-coordinator snapshot. The runner
+caps concurrency, cancels siblings cooperatively after a failure, and emits results in declared branch
+order. Updates are merged only after every branch succeeds. Two branches writing the same key fail
+the group; no coordinator or branch update is checkpointed on partial failure. External side effects
+that completed before failure cannot be rolled back.
+
+`WorkflowCheckpoint` stores schema version, workflow and definition identity, original input,
+committed state, current node, completed nodes, lifecycle status, revision, and last failure. Resume
+first claims the loaded revision through compare-and-swap, then reruns the last uncompleted node.
+Replay starts a new workflow ID from the original input. A definition ID or version mismatch is
+rejected rather than applying old state to changed code.
+
+Every node receives a stable idempotency key derived from workflow ID, definition ID/version, and node
+ID. Resume reuses it; replay changes it. This establishes an at-least-once boundary analogous to a job
+consumer passing a deduplication key to a transactional downstream service. The local checkpoint
+alone cannot provide exactly-once effects.
+
 ## Dependency Rules
 
 ```text
@@ -232,6 +273,8 @@ OpenAI adapter -> RunContext + neutral models + OpenAI SDK
 llama.cpp adapter -> RunContext + neutral models + OpenAI SDK transport
 Event adapters -> RunEvent (future concrete integrations)
 EvaluationRunner -> AgentRuntime + neutral models + RunEvent
+WorkflowRunner -> WorkflowDefinition + CheckpointStore + RunContext + RunEvent
+JSON checkpoint store -> WorkflowCheckpoint + local filesystem
 ```
 
 - Session state is owned above the runtime; one run cannot commit partial history.
@@ -239,7 +282,9 @@ EvaluationRunner -> AgentRuntime + neutral models + RunEvent
 - Provider adapters translate wire data and classify infrastructure failures.
 - Event sinks observe execution but cannot mutate runtime state.
 - Evaluation observes production-owned results and events; it cannot implement alternate execution.
-- Workflow, persistence, and multi-agent modules are not introduced before their phases.
+- Workflow nodes depend on shared execution contracts, not provider SDKs or CLI state.
+- Checkpoint stores persist scheduler state but do not own workflow transitions or external effects.
+- Session/context and multi-agent modules are not introduced before their phases.
 
 ## Configuration
 
@@ -262,6 +307,8 @@ the runtime's model-attempt budget and defaults to three. All values are validat
   tool-history translation, usage extraction, and error classification.
 - Evaluation tests assert schema validation, mode isolation, predicates, metrics, report serialization,
   and the committed Phase 3 deterministic case set.
+- Workflow tests assert graph validation, conditional routing, deterministic parallel merge, sibling
+  cancellation, checkpoint conflicts, interruption, resume, replay, and idempotency-key stability.
 - CI runs Ruff, strict mypy, and pytest with at least 85% coverage.
 - CI also runs the credential-free deterministic behavioral suite after implementation tests.
 
@@ -272,10 +319,15 @@ nondeterminism make it an unsuitable correctness gate.
 
 - The runtime is synchronous; cancellation cannot preempt a blocking SDK call or Python thread.
 - `AgentApplication` conversation state is not safe for concurrent callers.
-- Tool calls are sequential and tool retries are intentionally unsupported.
+- Agent-requested tool calls are sequential and tool retries are intentionally unsupported.
 - Event sinks are best-effort and no concrete durable telemetry adapter is included.
 - Conversation history is process-local, unbounded, and non-streaming.
-- There are no approvals, checkpoints, persistence, or workflow orchestration.
+- There is no approval policy or durable agent conversation/session storage.
+- Agent conversation state is still in memory; workflow checkpoints are not session storage.
+- JSON file checkpoints retain only the latest revision and coordinate one process. There is no
+  distributed lease, checkpoint history, migration framework, or multi-worker recovery.
+- Workflows reject cycles, nested parallel subgraphs, dynamic graph mutation, and conflicting branch
+  writes. Cooperative cancellation cannot force-stop a blocking node.
 - llama.cpp compatibility depends on the selected model's chat template and tool-calling support;
   the adapter does not attempt to infer or rewrite incompatible templates.
 - The evaluation corpus is intentionally small, live mode runs once per case, and reports do not yet
@@ -288,6 +340,8 @@ nondeterminism make it an unsuitable correctness gate.
 - [ADR-0002: Explicit Tool Boundary and Bounded Agent Loop](adr/0002-explicit-tool-boundary-and-bounded-loop.md)
 - [ADR-0003: Observable Runtime and Cooperative Cancellation](adr/0003-observable-runtime-and-cooperative-cancellation.md)
 - [ADR-0004: Separate Evaluation Harness from Agent Execution](adr/0004-evaluation-harness-boundary.md)
+- [ADR-0005: Checkpoint Deterministic Workflow Progress at Node Boundaries](adr/0005-checkpointed-deterministic-workflow.md)
 - [Phase 2 Framework Comparison](learning/phase-2-framework-comparison.md)
 - [Roadmap Reassessment After Phase 3](learning/roadmap-reassessment-after-phase-3.md)
 - [Phase 4 BFCL and GAIA Comparison](learning/phase-4-bfcl-gaia-comparison.md)
+- [Phase 5 LangGraph and EINO Workflow Comparison](learning/phase-5-langgraph-eino-workflow-comparison.md)

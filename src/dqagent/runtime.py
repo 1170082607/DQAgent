@@ -1,14 +1,10 @@
 """Observable runtime for one bounded agent execution."""
 
 import json
-import logging
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from enum import StrEnum
-from types import MappingProxyType
-from typing import Protocol
 
 from dqagent.errors import (
     AgentLoopError,
@@ -18,6 +14,7 @@ from dqagent.errors import (
     RunCancelledError,
     RunDeadlineExceededError,
 )
+from dqagent.events import EventSink, RunEvent, RunEventEmitter, RunEventType, RunState
 from dqagent.execution import RunContext
 from dqagent.llm import LLMClient
 from dqagent.models import (
@@ -32,51 +29,15 @@ from dqagent.models import (
 )
 from dqagent.tools import ToolRegistry
 
-logger = logging.getLogger(__name__)
-
-
-class RunState(StrEnum):
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-    TIMED_OUT = "timed_out"
-
-
-class RunEventType(StrEnum):
-    RUN_STARTED = "run_started"
-    MODEL_REQUEST_STARTED = "model_request_started"
-    MODEL_REQUEST_COMPLETED = "model_request_completed"
-    MODEL_REQUEST_FAILED = "model_request_failed"
-    RETRY_SCHEDULED = "retry_scheduled"
-    TOOL_CALL_STARTED = "tool_call_started"
-    TOOL_CALL_COMPLETED = "tool_call_completed"
-    RUN_COMPLETED = "run_completed"
-    RUN_FAILED = "run_failed"
-    RUN_CANCELLED = "run_cancelled"
-    RUN_TIMED_OUT = "run_timed_out"
-
-
-@dataclass(frozen=True, slots=True)
-class RunEvent:
-    run_id: str
-    sequence: int
-    type: RunEventType
-    state: RunState
-    occurred_at: datetime
-    elapsed_seconds: float
-    attributes: Mapping[str, object] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "attributes", MappingProxyType(dict(self.attributes)))
-
-
-class EventSink(Protocol):
-    """Receives ordered runtime events for tracing, metrics, or audit adapters."""
-
-    def emit(self, event: RunEvent) -> None:
-        """Consume one immutable event without raising into the run."""
-        ...
+__all__ = [
+    "AgentRunResult",
+    "AgentRuntime",
+    "EventSink",
+    "RetryPolicy",
+    "RunEvent",
+    "RunEventType",
+    "RunState",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,35 +92,6 @@ class AgentRunResult:
     completed_at: datetime
 
 
-class _EventEmitter:
-    def __init__(self, context: RunContext, sinks: Sequence[EventSink]) -> None:
-        self._context = context
-        self._sinks = tuple(sinks)
-        self.events: list[RunEvent] = []
-
-    def emit(
-        self,
-        event_type: RunEventType,
-        state: RunState,
-        attributes: Mapping[str, object] | None = None,
-    ) -> None:
-        event = RunEvent(
-            run_id=self._context.run_id,
-            sequence=len(self.events) + 1,
-            type=event_type,
-            state=state,
-            occurred_at=datetime.now(UTC),
-            elapsed_seconds=self._context.elapsed_seconds,
-            attributes=MappingProxyType(dict(attributes or {})),
-        )
-        self.events.append(event)
-        for sink in self._sinks:
-            try:
-                sink.emit(event)
-            except Exception:  # Observability must not change business execution semantics.
-                logger.exception("runtime event sink failed", extra={"run_id": event.run_id})
-
-
 class AgentRuntime:
     """Owns one run's loop, retry policy, lifecycle, and event stream."""
 
@@ -193,7 +125,7 @@ class AgentRuntime:
         context: RunContext | None = None,
     ) -> AgentRunResult:
         run_context = context or RunContext(timeout_seconds=self._default_timeout_seconds)
-        emitter = _EventEmitter(run_context, self._event_sinks)
+        emitter = RunEventEmitter(run_context, self._event_sinks)
         pending = list(conversation)
         seen_call_ids: set[str] = set()
         seen_executions: set[tuple[str, str]] = set()
@@ -236,7 +168,7 @@ class AgentRuntime:
                         state=RunState.COMPLETED,
                         output=assistant_message,
                         conversation=tuple(pending),
-                        events=tuple(emitter.events),
+                        events=emitter.events,
                         started_at=run_context.started_at,
                         completed_at=datetime.now(UTC),
                     )
@@ -332,7 +264,7 @@ class AgentRuntime:
         self,
         pending: Sequence[ConversationItem],
         context: RunContext,
-        emitter: _EventEmitter,
+        emitter: RunEventEmitter,
         iteration: int,
     ) -> Completion:
         for attempt in range(1, self._retry_policy.max_attempts + 1):
