@@ -1,0 +1,68 @@
+{
+  "report_schema_version": 1,
+  "suite_id": "phase-6-context",
+  "suite_schema_version": 1,
+  "generated_at": "2026-07-30T10:03:50.129367+00:00",
+  "summary": {
+    "passed": true,
+    "passed_cases": 3,
+    "failed_cases": 0,
+    "executed_cases": 3
+  },
+  "results": [
+    {
+      "case_id": "long_session_constraint_retention",
+      "passed": true,
+      "metrics": {
+        "estimated_characters": 491,
+        "max_characters": 560,
+        "retained_turns": 1,
+        "omitted_turns": 2,
+        "summary_method": "structural"
+      },
+      "checks": [
+        {"name": "context.contains_all", "passed": true, "detail": "all required fragments retained"},
+        {"name": "context.absent_all", "passed": true, "detail": "all expected losses absent"},
+        {"name": "context.within_budget", "passed": true, "detail": "observed 491, maximum 560"},
+        {"name": "context.min_omitted_turns", "passed": true, "detail": "observed 2, minimum 1"},
+        {"name": "context.summary_method", "passed": true, "detail": "expected structural, got structural"}
+      ]
+    },
+    {
+      "case_id": "context_overflow_recovery",
+      "passed": true,
+      "metrics": {
+        "estimated_characters": 326,
+        "max_characters": 430,
+        "retained_turns": 1,
+        "omitted_turns": 2,
+        "summary_method": "structural"
+      },
+      "checks": [
+        {"name": "context.contains_all", "passed": true, "detail": "all required fragments retained"},
+        {"name": "context.absent_all", "passed": true, "detail": "all expected losses absent"},
+        {"name": "context.within_budget", "passed": true, "detail": "observed 326, maximum 430"},
+        {"name": "context.min_omitted_turns", "passed": true, "detail": "observed 2, minimum 2"},
+        {"name": "context.summary_method", "passed": true, "detail": "expected structural, got structural"}
+      ]
+    },
+    {
+      "case_id": "structural_compaction_loss_visible",
+      "passed": true,
+      "metrics": {
+        "estimated_characters": 323,
+        "max_characters": 380,
+        "retained_turns": 1,
+        "omitted_turns": 2,
+        "summary_method": "structural"
+      },
+      "checks": [
+        {"name": "context.contains_all", "passed": true, "detail": "all required fragments retained"},
+        {"name": "context.absent_all", "passed": true, "detail": "all expected losses absent"},
+        {"name": "context.within_budget", "passed": true, "detail": "observed 323, maximum 380"},
+        {"name": "context.min_omitted_turns", "passed": true, "detail": "observed 2, minimum 2"},
+        {"name": "context.summary_method", "passed": true, "detail": "expected structural, got structural"}
+      ]
+    }
+  ]
+}

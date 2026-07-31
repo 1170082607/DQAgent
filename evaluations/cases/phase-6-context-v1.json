@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "suite_id": "phase-6-context",
+  "cases": [
+    {
+      "id": "long_session_constraint_retention",
+      "input": {
+        "prompt_sections": [
+          {"name": "behavior", "content": "Follow retained user constraints."}
+        ],
+        "turns": [
+          {
+            "user": "The durable constraint is ALPHA. xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "assistant": "I will retain ALPHA. yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+          },
+          {
+            "user": "Discuss an unrelated middle topic. mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+            "assistant": "Middle topic acknowledged. nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+          }
+        ],
+        "user_message": "Which durable constraint still applies?"
+      },
+      "budget": {
+        "max_characters": 620,
+        "reserved_characters": 60,
+        "summary_max_characters": 180,
+        "structural_input_max_characters": 400,
+        "min_recent_turns": 1
+      },
+      "expected": {
+        "contains_all": ["ALPHA", "Which durable constraint still applies?"],
+        "min_omitted_turns": 1,
+        "summary_method": "structural"
+      }
+    },
+    {
+      "id": "context_overflow_recovery",
+      "input": {
+        "turns": [
+          {
+            "user": "old input oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo",
+            "assistant": "old output pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp"
+          },
+          {
+            "user": "another old input qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq",
+            "assistant": "another old output rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+          }
+        ],
+        "user_message": "LATEST_REQUEST must survive trimming."
+      },
+      "budget": {
+        "max_characters": 480,
+        "reserved_characters": 50,
+        "summary_max_characters": 100,
+        "structural_input_max_characters": 180
+      },
+      "expected": {
+        "contains_all": ["LATEST_REQUEST"],
+        "min_omitted_turns": 2,
+        "summary_method": "structural"
+      }
+    },
+    {
+      "id": "structural_compaction_loss_visible",
+      "input": {
+        "turns": [
+          {
+            "user": "first old turn aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "assistant": "first response bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          {
+            "user": "second old turn contains LOSS_MARKER cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "assistant": "second response dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+          }
+        ],
+        "user_message": "Show what remains after bounded structural compaction."
+      },
+      "budget": {
+        "max_characters": 430,
+        "reserved_characters": 50,
+        "summary_max_characters": 80,
+        "structural_input_max_characters": 80
+      },
+      "expected": {
+        "contains_all": ["Show what remains"],
+        "absent_all": ["LOSS_MARKER"],
+        "min_omitted_turns": 2,
+        "summary_method": "structural"
+      }
+    }
+  ]
+}

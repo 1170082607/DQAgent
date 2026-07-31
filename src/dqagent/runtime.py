@@ -87,6 +87,7 @@ class AgentRunResult:
     state: RunState
     output: Message
     conversation: tuple[ConversationItem, ...]
+    new_items: tuple[ConversationItem, ...]
     events: tuple[RunEvent, ...]
     started_at: datetime
     completed_at: datetime
@@ -123,10 +124,12 @@ class AgentRuntime:
         conversation: Sequence[ConversationItem],
         *,
         context: RunContext | None = None,
+        context_attributes: Mapping[str, object] | None = None,
     ) -> AgentRunResult:
         run_context = context or RunContext(timeout_seconds=self._default_timeout_seconds)
         emitter = RunEventEmitter(run_context, self._event_sinks)
         pending = list(conversation)
+        initial_item_count = len(pending)
         seen_call_ids: set[str] = set()
         seen_executions: set[tuple[str, str]] = set()
         emitter.emit(
@@ -137,6 +140,12 @@ class AgentRuntime:
                 "metadata": dict(run_context.metadata),
             },
         )
+        if context_attributes is not None:
+            emitter.emit(
+                RunEventType.CONTEXT_ASSEMBLED,
+                RunState.RUNNING,
+                context_attributes,
+            )
 
         try:
             run_context.check_active()
@@ -168,6 +177,7 @@ class AgentRuntime:
                         state=RunState.COMPLETED,
                         output=assistant_message,
                         conversation=tuple(pending),
+                        new_items=tuple(pending[initial_item_count:]),
                         events=emitter.events,
                         started_at=run_context.started_at,
                         completed_at=datetime.now(UTC),
@@ -259,6 +269,17 @@ class AgentRuntime:
                 },
             )
             raise error from exc
+
+    def create_context(
+        self,
+        *,
+        metadata: Mapping[str, object] | None = None,
+    ) -> RunContext:
+        """Create a context using this runtime's end-to-end timeout policy."""
+        return RunContext(
+            timeout_seconds=self._default_timeout_seconds,
+            metadata=metadata,
+        )
 
     def _complete_with_retry(
         self,

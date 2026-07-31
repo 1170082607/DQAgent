@@ -19,3 +19,4 @@ to an ADR when it becomes a durable project decision.
 - [Roadmap Reassessment After Phase 3](roadmap-reassessment-after-phase-3.md)
 - [Phase 4 Comparison: DQAgent, BFCL, and GAIA](phase-4-bfcl-gaia-comparison.md)
 - [Phase 5 Comparison: DQAgent, LangGraph, and EINO Workflow Execution](phase-5-langgraph-eino-workflow-comparison.md)
+- [Phase 6 Comparison: DQAgent Session and Context Boundaries](phase-6-session-context-comparison.md)

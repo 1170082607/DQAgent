@@ -27,3 +27,4 @@ Start from [0000-template.md](0000-template.md).
 - [ADR-0003: Observable Runtime and Cooperative Cancellation](0003-observable-runtime-and-cooperative-cancellation.md)
 - [ADR-0004: Separate Evaluation Harness from Agent Execution](0004-evaluation-harness-boundary.md)
 - [ADR-0005: Checkpoint Deterministic Workflow Progress at Node Boundaries](0005-checkpointed-deterministic-workflow.md)
+- [ADR-0006: Separate Durable Session Transcripts from Active Model Context](0006-separate-session-transcript-from-active-context.md)

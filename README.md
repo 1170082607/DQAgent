@@ -4,9 +4,9 @@ DQAgent is an engineering-first learning project for building AI Agent capabilit
 from foundational components. Its purpose is to understand the design of production-oriented agent
 systems instead of treating frameworks as black boxes.
 
-**Status:** Pre-alpha. Phase 5 is implemented: DQAgent now supports validated deterministic workflows,
-bounded parallel branches, durable checkpoints, interruption, resume, and replay. Phase 6 will add
-context engineering and durable sessions.
+**Status:** Pre-alpha. Phase 6 is implemented: DQAgent now supports durable session transcripts,
+bounded active context, prompt sections, on-demand project knowledge, structural/model summaries,
+and context regression evaluation. Phase 7 will add retrieval-augmented generation.
 
 ## Goals
 
@@ -26,7 +26,7 @@ context engineering and durable sessions.
 - Add abstractions for roadmap stages that have not been implemented.
 - Treat workflow graphs, prompt chains, or additional agents as substitutes for model capability.
 
-## Phase 5 Capabilities
+## Phase 6 Capabilities
 
 - Interactive and one-shot command-line chat.
 - In-memory conversation history with optional system prompts.
@@ -54,13 +54,22 @@ context engineering and durable sessions.
 - Stable node idempotency keys for external side-effect deduplication.
 - Shared `RunContext`, lifecycle events, deadlines, cancellation, and event sinks across agent and
   workflow runtimes.
+- Durable session IDs, complete provider-neutral transcripts, resume, and CAS conflict detection.
+- In-memory and atomic local JSON session stores with explicit process-local concurrency semantics.
+- Named prompt sections and allowlisted project knowledge loaded only by requested key.
+- Character-estimated context budgets with a reserve for tool schemas, output, and tokenizer error.
+- Whole-turn trimming that preserves tool-call/tool-result pairing.
+- Bounded structural compaction and optional model summaries with source provenance.
+- `CONTEXT_ASSEMBLED` events with budget, retained/omitted turn, knowledge, and summary metadata.
+- A deterministic context evaluation suite for constraint retention, overflow recovery, and known
+  compaction loss.
 - Environment-based configuration with explicit validation.
 - Unit tests, Ruff linting, mypy strict type checking, and GitHub Actions CI.
 
-Streaming, durable sessions, context compaction, hard execution isolation, approval policy,
-distributed workflow leases, durable telemetry delivery, LLM-as-judge, and repeated live-model
-sampling remain deferred. Evaluation, security, durability, and observability remain continuous
-constraints for later phases.
+Streaming, retrieval, cross-session memory, hard execution isolation, approval policy, distributed
+session/workflow leases, durable telemetry delivery, LLM-as-judge, and repeated live-model sampling
+remain deferred. Evaluation, security, durability, and observability remain continuous constraints
+for later phases.
 
 ## Installation
 
@@ -137,6 +146,18 @@ Send one message and exit:
 dqagent --message "Explain the difference between an agent loop and a workflow."
 ```
 
+Create a durable session, then resume it from a later process using the same ID:
+
+```bash
+dqagent --session-id learning-1 --message "Remember that the project constraint is ALPHA."
+dqagent --session-id learning-1 --message "Which project constraint applies?"
+```
+
+Session files default to `.local/sessions`; override the location with `--session-dir`. The active
+context defaults to a 32,000-character estimate with 4,000 characters reserved for tool schemas,
+output, and tokenizer error. `--context-max-characters` changes the total estimate. This budget is
+provider-neutral and does not claim exact token counting.
+
 The model can call `current_time` when a request needs current time information and `get_weather`
 when a demonstration needs a weather lookup for a non-empty city and a `YYYY-MM-DD` date.
 `get_weather` always returns structured, deterministic sunny data marked with `is_demo: true` and
@@ -160,6 +181,12 @@ Deterministic evaluation proves the harness and evaluators are stable; it does n
 quality. Live reports are model samples and should be repeated before drawing regression conclusions.
 See [evaluations/README.md](evaluations/README.md) for the case contract and report semantics.
 
+Run the credential-free Phase 6 context regression suite:
+
+```bash
+dqagent-context-eval --output .local/evaluations/context-report.json
+```
+
 Run the durable workflow example. The first process checkpoints and interrupts after `prepare`; the
 second claims the checkpoint and continues from `apply`:
 
@@ -174,7 +201,8 @@ cannot guarantee exactly-once effects across a process crash.
 
 Useful interactive commands:
 
-- `/reset`: clear conversation history while preserving the system prompt.
+- `/reset`: clear in-memory history while preserving the system prompt. Durable sessions reject
+  reset; use a new session ID so the existing transcript remains recoverable.
 - `/exit` or `/quit`: end the session.
 
 ## Repository Layout
@@ -185,6 +213,9 @@ src/dqagent/runtime.py Observable agent runtime and retry policy
 src/dqagent/execution.py Run identity, deadline, and cancellation context
 src/dqagent/events.py Shared agent/workflow lifecycle events
 src/dqagent/evaluation.py Behavioral case loader, runner, checks, and reports
+src/dqagent/context.py Prompt assembly, knowledge loading, budgets, and compaction
+src/dqagent/session.py Durable transcript model and session stores
+src/dqagent/context_evaluation.py Deterministic context regression runner
 src/dqagent/workflow.py Deterministic workflow definition and runner
 src/dqagent/checkpoint.py Workflow checkpoint contract and stores
 evaluations/        Versioned cases and committed baseline reports
@@ -203,6 +234,7 @@ ruff check .
 mypy src
 pytest
 dqagent-eval --mode deterministic
+dqagent-context-eval
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for change guidelines.

@@ -12,6 +12,7 @@ class ErrorCategory(StrEnum):
     CANCELLED = "cancelled"
     DEADLINE_EXCEEDED = "deadline_exceeded"
     LOOP_LIMIT = "loop_limit"
+    CONTEXT_LIMIT = "context_limit"
     INTERNAL = "internal"
 
 
@@ -87,3 +88,29 @@ class CheckpointError(DQAgentError):
 
 class CheckpointConflictError(CheckpointError):
     """Raised when a stale workflow owner attempts to overwrite a checkpoint."""
+
+
+class SessionError(DQAgentError):
+    """Raised when durable conversation state cannot be loaded or saved."""
+
+    category = ErrorCategory.UNAVAILABLE
+
+
+class SessionNotFoundError(SessionError):
+    """Raised when a requested durable session does not exist."""
+
+
+class SessionConflictError(SessionError):
+    """Raised when a stale session owner attempts to overwrite a transcript."""
+
+
+class ContextError(DQAgentError):
+    """Raised when an active model context cannot be constructed safely."""
+
+    category = ErrorCategory.CONFIGURATION
+
+
+class ContextOverflowError(ContextError):
+    """Raised when mandatory prompt content cannot fit the configured budget."""
+
+    category = ErrorCategory.CONTEXT_LIMIT

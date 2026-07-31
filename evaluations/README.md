@@ -1,8 +1,8 @@
 # Behavioral Evaluations
 
-This directory contains versioned behavioral cases and committed baseline reports. Evaluations are
-kept separate from `tests/`: tests verify deterministic implementation contracts, while evaluations
-measure an agent run's answer, tool behavior, trajectory, latency, attempts, and reported token use.
+This directory contains versioned behavioral and context cases with committed baseline reports.
+Evaluations are kept separate from `tests/`: tests verify deterministic implementation contracts,
+while evaluations measure agent outcomes or the quality of a bounded model-context projection.
 
 ## Case Contract
 
@@ -51,3 +51,14 @@ the case-level ceilings are the regression gates.
 Trajectory constraints are shared across modes because they describe agent semantics. Latency and
 token ceilings live under `resource_limits.<mode>` because deterministic fixtures, hosted models,
 and local inference have materially different operational envelopes.
+
+`cases/phase-6-context-v1.json` is a separate component-level suite run by
+`dqagent-context-eval`. It uses the production `ContextBuilder` without invoking a model and checks:
+
+- Retention of an old explicit constraint after whole-turn compaction.
+- Preservation of the current request while oversized history is omitted within budget.
+- Visibility of a known loss when structural summary input is deliberately too small.
+
+`baselines/phase-6-context-deterministic-v1.json` records the Phase 6 result. The known-loss case
+passing means the expected limitation remains observable; it does not claim the omitted marker was
+successfully retained.

@@ -164,24 +164,24 @@ or system interrupts.
 
 ### Phase 6: Context Engineering and Sessions
 
-**Status:** Next
+**Status:** Complete
 
 **Outcome:** Keep long-running model context relevant, bounded, and recoverable.
 
-- Separate durable session transcripts from the active model context.
-- Add session identity, persistence, resume, and explicit conversation concurrency behavior.
-- Assemble prompts from owned sections instead of one hard-coded system string.
-- Define context budgets and preserve tool-call/tool-result pairing during trimming.
-- Add cheap structural compaction before model-generated summaries and retain summary provenance.
-- Load project knowledge on demand rather than injecting all available instructions up front.
-- Evaluate long-session constraint retention, context overflow recovery, and compaction loss.
+- [x] Separate durable session transcripts from the active model context.
+- [x] Add session identity, persistence, resume, and explicit conversation concurrency behavior.
+- [x] Assemble prompts from owned sections instead of one hard-coded system string.
+- [x] Define context budgets and preserve tool-call/tool-result pairing during trimming.
+- [x] Add cheap structural compaction before model-generated summaries and retain summary provenance.
+- [x] Load project knowledge on demand rather than injecting all available instructions up front.
+- [x] Evaluate long-session constraint retention, context overflow recovery, and compaction loss.
 
 Session storage answers "what happened"; context construction answers "what should the model see
 now." They must remain separate responsibilities.
 
 ### Phase 7: Retrieval-Augmented Generation
 
-**Status:** Planned
+**Status:** Next
 
 **Outcome:** Ground answers in external knowledge with measurable retrieval quality.
 

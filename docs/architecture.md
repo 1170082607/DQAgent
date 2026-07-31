@@ -2,14 +2,15 @@
 
 ## Status
 
-This document describes the implemented Phase 5 architecture. Durable sessions, context engineering,
-hard execution isolation, and other future capabilities remain in the [roadmap](roadmap.md).
+This document describes the implemented Phase 6 architecture. Retrieval, long-term memory, hard
+execution isolation, and other future capabilities remain in the [roadmap](roadmap.md).
 
 ## System Context
 
-DQAgent is a local command-line agent. It maintains in-memory conversation state and delegates each
-user turn to an observable runtime that calls a configured model, executes application-owned tools,
-and continues until it reaches a terminal state.
+DQAgent is a local command-line agent. It can maintain in-memory conversation state or persist a
+session transcript, project that transcript into a bounded active context, and delegate each user
+turn to an observable runtime that calls a configured model, executes application-owned tools, and
+continues until it reaches a terminal state.
 
 ```text
 User -> CLI -> AgentApplication -> AgentRuntime -> LLMClient -> provider adapter
@@ -31,11 +32,25 @@ Workflow input -> WorkflowRunner -> validated node graph -> WorkflowRunResult
                         |                   |
                         +-> CheckpointStore +-> sequential / conditional / parallel nodes
                         +-> RunContext + shared lifecycle events
+
+Session ID -> SessionAgentApplication -> SessionStore (full transcript + CAS revision)
+                       |
+                       +-> ContextBuilder -> prompt sections + requested project knowledge
+                       |        |
+                       |        +-> whole-turn selection -> structural/model summary
+                       |
+                       +-> AgentRuntime -> new run items -> session commit
+
+Context case -> ContextEvaluationRunner -> production ContextBuilder -> context report
 ```
 
 The CLI is the composition root. It creates the provider adapter, built-in tool registry, retry
 policy, runtime, and stateful application. `ChatApplication` remains a direct text-only use case and
 does not use the agent runtime.
+
+When `--session-id` is supplied, the CLI composes `JsonFileSessionStore`, `PromptAssembler`, and
+`ContextBuilder` around `SessionAgentApplication`. A later process using the same ID resumes the
+stored transcript. Without that flag, the original in-memory `AgentApplication` behavior remains.
 
 The evaluation CLI is a separate composition root. It loads versioned cases, selects either a
 scripted or live `LLMClient`, creates an isolated production runtime per case, and writes a structured
@@ -49,6 +64,15 @@ step genuinely needs model decisions, but workflow transitions remain determinis
 
 `AgentApplication` owns a conversation. It adds a user message to pending history, calls the runtime,
 and commits the returned conversation only when the run completes successfully.
+
+`SessionAgentApplication` owns one durable session transaction. It loads a snapshot, constructs a
+temporary context, calls the same runtime, and appends only the current user message and the runtime's
+new items through compare-and-swap. `SessionStore` owns serialization and revision checks; it does not
+select model context.
+
+`PromptAssembler` owns named system sections and explicitly requested project knowledge.
+`ContextBuilder` owns budget estimation, complete-turn selection, compaction, and summary provenance.
+Neither component mutates the durable transcript.
 
 `AgentRuntime` owns one execution. It controls model/tool iteration, repeated-call protection,
 provider retry, lifecycle transitions, and event emission. It does not persist conversation state.
@@ -71,6 +95,9 @@ conversation items, and runtime events; it does not alter runtime control flow o
 `WorkflowRunner` owns graph traversal, node-boundary commits, conditional selection, bounded branch
 execution, interruption, recovery, and workflow events. `CheckpointStore` owns compare-and-swap
 persistence but does not execute nodes or infer retry safety.
+
+`ContextEvaluationRunner` measures the production context projection directly. It does not generate
+answers or implement an alternate context algorithm.
 
 This split is similar to separating a stateful application service from a request-scoped middleware
 and execution engine. The analogy is incomplete because the model can request more work, so the
@@ -133,6 +160,8 @@ UTC timestamp, elapsed seconds, and structured attributes. Current event types c
 - Model request start, completion, and failure for each attempt.
 - Scheduled retry and backoff duration.
 - Tool-call processing start and completion.
+- Context assembly with budget, turn selection, knowledge keys, and summary provenance.
+- Workflow node, transition, checkpoint, interruption, and resume activity.
 
 `AgentRunResult.events` returns the complete successful event sequence. `EventSink` adapters receive
 events as they happen, including terminal failure events, and can translate them into traces,
@@ -151,8 +180,8 @@ boundary. Event sinks are internal operational channels and must protect diagnos
 
 All user-visible runtime exceptions inherit `DQAgentError` and expose a stable `ErrorCategory`, a
 `retryable` flag, and an optional run ID. Categories distinguish provider failure, rate limiting,
-unavailability, request timeout, cancellation, deadline exhaustion, loop limit, configuration, and
-unexpected internal failure.
+unavailability, request timeout, cancellation, deadline exhaustion, loop limit, context limit,
+configuration, and unexpected internal failure.
 
 The OpenAI adapter marks timeout, rate-limit, connection, and server errors retryable. Other SDK
 errors remain non-retryable. The SDK's implicit retries are disabled so `AgentRuntime` is the single
@@ -263,10 +292,46 @@ ID. Resume reuses it; replay changes it. This establishes an at-least-once bound
 consumer passing a deduplication key to a transactional downstream service. The local checkpoint
 alone cannot provide exactly-once effects.
 
+## Sessions and Context Engineering
+
+`SessionSnapshot` persists a schema version, session ID, provider-neutral transcript, CAS revision,
+and timestamps. Only successful turns enter the transcript. System prompts, loaded knowledge, and
+generated summaries are request-scoped projections and never become historical facts.
+
+The in-memory store serializes access with a lock. The JSON store hashes session IDs into filenames,
+uses atomic replacement, and checks the expected revision while holding one store-instance lock. This
+prevents process-local lost updates. It is not a distributed lease: another process can perform model
+or tool work from a stale revision and lose the final CAS race.
+
+Prompt assembly keeps base behavior and project knowledge in named sections. Project files are loaded
+only for explicitly requested keys from an allowlist, after verifying the resolved path remains under
+the configured root. This is context selection, not retrieval ranking or long-term memory.
+
+`ContextBudget` uses a deterministic serialized-character estimate because provider tokenizers differ.
+`reserved_characters` accounts for tool definitions, expected output, and estimation error. The
+builder rejects a budget that cannot fit prompt sections plus required recent turns. Otherwise it:
+
+```text
+validate transcript -> split complete user turns -> retain required recent turns
+                    -> add newer old turns while budget remains
+                    -> structurally compact omitted turns
+                    -> optional model summary -> insert provenance-bearing system message
+```
+
+Trimming never splits a turn, so tool calls and corresponding results remain paired. Structural
+compaction bounds what an optional summarizer sees. Summary provenance records the method, source
+digest and size, structural input size, and model/response identity. The `CONTEXT_ASSEMBLED` event
+records selected/omitted turn counts, budget use, knowledge keys, and summary identity.
+
+The deterministic context suite measures old-constraint retention, recovery from an oversized full
+history by trimming, and a known loss case caused by a deliberately small structural summary input.
+The loss case passing means the regression is visible and stable, not that compaction is lossless.
+
 ## Dependency Rules
 
 ```text
 CLI -> AgentApplication -> AgentRuntime
+CLI -> SessionAgentApplication -> ContextBuilder + SessionStore + AgentRuntime
 AgentRuntime -> RunContext + LLMClient + ToolRegistry + neutral models
 ToolRegistry -> RunContext + neutral models + jsonschema
 OpenAI adapter -> RunContext + neutral models + OpenAI SDK
@@ -275,16 +340,20 @@ Event adapters -> RunEvent (future concrete integrations)
 EvaluationRunner -> AgentRuntime + neutral models + RunEvent
 WorkflowRunner -> WorkflowDefinition + CheckpointStore + RunContext + RunEvent
 JSON checkpoint store -> WorkflowCheckpoint + local filesystem
+ContextBuilder -> PromptAssembler + optional ConversationSummarizer + neutral models
+JSON session store -> SessionSnapshot + local filesystem
+ContextEvaluationRunner -> ContextBuilder + neutral models
 ```
 
 - Session state is owned above the runtime; one run cannot commit partial history.
+- Session storage records what happened; context construction decides what the model sees now.
 - Runtime and tool modules must not import provider SDKs.
 - Provider adapters translate wire data and classify infrastructure failures.
 - Event sinks observe execution but cannot mutate runtime state.
 - Evaluation observes production-owned results and events; it cannot implement alternate execution.
 - Workflow nodes depend on shared execution contracts, not provider SDKs or CLI state.
 - Checkpoint stores persist scheduler state but do not own workflow transitions or external effects.
-- Session/context and multi-agent modules are not introduced before their phases.
+- Retrieval, memory, and multi-agent modules are not introduced before their phases.
 
 ## Configuration
 
@@ -309,6 +378,10 @@ the runtime's model-attempt budget and defaults to three. All values are validat
   and the committed Phase 3 deterministic case set.
 - Workflow tests assert graph validation, conditional routing, deterministic parallel merge, sibling
   cancellation, checkpoint conflicts, interruption, resume, replay, and idempotency-key stability.
+- Session tests assert item round-trips, atomic JSON persistence, resume, rollback, CAS conflicts, and
+  separation of transient summaries from durable history.
+- Context tests assert prompt ownership, allowlisted on-demand knowledge, whole-turn trimming, tool
+  pairing, structural/model summary provenance, overflow errors, and deterministic context reports.
 - CI runs Ruff, strict mypy, and pytest with at least 85% coverage.
 - CI also runs the credential-free deterministic behavioral suite after implementation tests.
 
@@ -321,9 +394,13 @@ nondeterminism make it an unsuitable correctness gate.
 - `AgentApplication` conversation state is not safe for concurrent callers.
 - Agent-requested tool calls are sequential and tool retries are intentionally unsupported.
 - Event sinks are best-effort and no concrete durable telemetry adapter is included.
-- Conversation history is process-local, unbounded, and non-streaming.
-- There is no approval policy or durable agent conversation/session storage.
-- Agent conversation state is still in memory; workflow checkpoints are not session storage.
+- The legacy `AgentApplication` remains process-local and unbounded; durable behavior requires an
+  explicit `SessionAgentApplication` or CLI `--session-id`.
+- Session JSON stores retain only the latest revision and coordinate one process. They have no
+  distributed lease, append-only history, migration framework, tenant isolation, or retention policy.
+- Context budgets estimate characters rather than provider tokens. Structural and model summaries
+  are lossy, and model summarization adds a provider call before the main agent run.
+- There is no approval policy, retrieval index, or cross-session long-term memory.
 - JSON file checkpoints retain only the latest revision and coordinate one process. There is no
   distributed lease, checkpoint history, migration framework, or multi-worker recovery.
 - Workflows reject cycles, nested parallel subgraphs, dynamic graph mutation, and conflicting branch
@@ -341,7 +418,9 @@ nondeterminism make it an unsuitable correctness gate.
 - [ADR-0003: Observable Runtime and Cooperative Cancellation](adr/0003-observable-runtime-and-cooperative-cancellation.md)
 - [ADR-0004: Separate Evaluation Harness from Agent Execution](adr/0004-evaluation-harness-boundary.md)
 - [ADR-0005: Checkpoint Deterministic Workflow Progress at Node Boundaries](adr/0005-checkpointed-deterministic-workflow.md)
+- [ADR-0006: Separate Durable Session Transcripts from Active Model Context](adr/0006-separate-session-transcript-from-active-context.md)
 - [Phase 2 Framework Comparison](learning/phase-2-framework-comparison.md)
 - [Roadmap Reassessment After Phase 3](learning/roadmap-reassessment-after-phase-3.md)
 - [Phase 4 BFCL and GAIA Comparison](learning/phase-4-bfcl-gaia-comparison.md)
 - [Phase 5 LangGraph and EINO Workflow Comparison](learning/phase-5-langgraph-eino-workflow-comparison.md)
+- [Phase 6 Session and Context Comparison](learning/phase-6-session-context-comparison.md)
