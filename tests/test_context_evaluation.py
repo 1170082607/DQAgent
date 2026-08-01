@@ -30,6 +30,10 @@ def test_phase_6_context_regression_suite_passes() -> None:
         if result.case_id == "structural_compaction_loss_visible"
     )
     assert loss.omitted_turns == 2
+    assert loss.structural_input_turns == 1
+    assert loss.structural_omitted_turns == 1
+    assert loss.summary_source_turns == 1
+    assert loss.summary_omitted_turns == 1
 
 
 def test_context_evaluation_loader_rejects_invalid_schema(tmp_path: Path) -> None:

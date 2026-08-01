@@ -55,9 +55,10 @@ def make_builder(*, small: bool = False) -> ContextBuilder:
     return ContextBuilder(
         PromptAssembler((PromptSection("behavior", "Be precise."),)),
         ContextBudget(
-            max_characters=500 if small else 4_000,
+            max_characters=550 if small else 4_000,
             reserved_characters=50,
             summary_max_characters=120,
+            min_recent_turns=0 if small else 1,
         ),
     )
 
@@ -92,8 +93,10 @@ def test_session_application_persists_and_resumes_complete_transcript() -> None:
 def test_compacted_system_summary_is_not_written_to_durable_transcript() -> None:
     store = InMemorySessionStore()
     transcript = (
+        Message(Role.USER, "remember BETA"),
+        Message(Role.ASSISTANT, "noted"),
         Message(Role.USER, "old " + "x" * 200),
-        Message(Role.ASSISTANT, "constraint BETA " + "y" * 200),
+        Message(Role.ASSISTANT, "unrelated " + "y" * 200),
     )
     store.save(SessionSnapshot("compact", transcript), expected_revision=None)
     llm = StubLLM([Completion("BETA")])
@@ -168,3 +171,30 @@ def test_resume_rejects_missing_session() -> None:
             make_builder(),
             "missing",
         )
+
+
+def test_create_rejects_explicit_empty_session_id() -> None:
+    with pytest.raises(ValueError, match="session ID must not be empty"):
+        SessionAgentApplication.create(
+            make_runtime(StubLLM([])),
+            InMemorySessionStore(),
+            make_builder(),
+            session_id="",
+        )
+
+
+def test_supplied_run_context_adds_authoritative_session_metadata() -> None:
+    store = InMemorySessionStore()
+    llm = StubLLM([Completion("answer")])
+    app = SessionAgentApplication.create(
+        make_runtime(llm), store, make_builder(), session_id="actual-session"
+    )
+    parent = RunContext(metadata={"tenant": "acme", "session_id": "wrong-session"})
+
+    result = app.run("question", context=parent)
+
+    assert result.agent.run_id == parent.run_id
+    assert result.agent.events[0].attributes["metadata"] == {
+        "tenant": "acme",
+        "session_id": "actual-session",
+    }

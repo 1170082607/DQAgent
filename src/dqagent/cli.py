@@ -116,7 +116,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             default_timeout_seconds=settings.run_timeout_seconds,
             retry_policy=RetryPolicy(max_attempts=settings.max_model_attempts),
         )
-        if args.session_id:
+        if args.session_id is not None:
             store = JsonFileSessionStore(args.session_dir)
             sections = (
                 (PromptSection("behavior", args.system),) if args.system else ()

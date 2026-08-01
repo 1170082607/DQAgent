@@ -70,7 +70,8 @@ lease it cannot prevent duplicate model/tool work before the losing transaction 
 - No automatic memory extraction: selected cross-session memory belongs to Phase 8.
 - No retrieval index: on-demand project knowledge is an allowlisted file read, not Phase 7 RAG.
 - No claim of lossless summary: the Phase 6 evaluation intentionally records a bounded structural
-  compaction case where a later old marker disappears.
+  compaction case where a complete old turn and its marker disappear. Structural compaction never
+  preserves a character fragment of that turn, and provenance reports the loss.
 
 ## Sources
 

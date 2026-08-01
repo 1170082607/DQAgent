@@ -57,8 +57,8 @@ and local inference have materially different operational envelopes.
 
 - Retention of an old explicit constraint after whole-turn compaction.
 - Preservation of the current request while oversized history is omitted within budget.
-- Visibility of a known loss when structural summary input is deliberately too small.
+- Visibility of complete-turn loss when structural summary input is deliberately too small.
 
-`baselines/phase-6-context-deterministic-v1.json` records the Phase 6 result. The known-loss case
-passing means the expected limitation remains observable; it does not claim the omitted marker was
-successfully retained.
+`baselines/phase-6-context-deterministic-v1.json` records the Phase 6 result. The loss case passes only
+when the omitted marker is absent and `structural_omitted_turns` reports the dropped complete record;
+it does not claim compaction is lossless.

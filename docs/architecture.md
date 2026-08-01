@@ -294,9 +294,13 @@ alone cannot provide exactly-once effects.
 
 ## Sessions and Context Engineering
 
-`SessionSnapshot` persists a schema version, session ID, provider-neutral transcript, CAS revision,
-and timestamps. Only successful turns enter the transcript. System prompts, loaded knowledge, and
-generated summaries are request-scoped projections and never become historical facts.
+`SessionSnapshot` persists a schema version, session ID, validated provider-neutral transcript, CAS
+revision, and timestamps. Only complete successful turns enter the transcript. System prompts, loaded
+knowledge, and generated summaries are request-scoped projections and never become historical facts.
+
+When a caller supplies a `RunContext`, the session application creates a child context that preserves
+the run ID, deadline, cancellation, and caller metadata while setting the authoritative session ID.
+This keeps summary and agent work correlated without accepting a conflicting caller-provided ID.
 
 The in-memory store serializes access with a lock. The JSON store hashes session IDs into filenames,
 uses atomic replacement, and checks the expected revision while holding one store-instance lock. This
@@ -312,20 +316,25 @@ the configured root. This is context selection, not retrieval ranking or long-te
 builder rejects a budget that cannot fit prompt sections plus required recent turns. Otherwise it:
 
 ```text
-validate transcript -> split complete user turns -> retain required recent turns
+validate transcript -> split complete user turns -> retain current + required completed turns
                     -> add newer old turns while budget remains
-                    -> structurally compact omitted turns
+                    -> encode omitted turns as bounded, atomic JSONL records
                     -> optional model summary -> insert provenance-bearing system message
 ```
 
-Trimming never splits a turn, so tool calls and corresponding results remain paired. Structural
-compaction bounds what an optional summarizer sees. Summary provenance records the method, source
-digest and size, structural input size, and model/response identity. The `CONTEXT_ASSEMBLED` event
-records selected/omitted turn counts, budget use, knowledge keys, and summary identity.
+Trimming and structural compaction never split a turn, so tool calls and corresponding results remain
+paired. Structural records that cannot fit are omitted and counted; no character prefix is emitted.
+Summary drafts must satisfy their output contract and final serialized budget or are rejected/omitted
+without mutation. Inserted summary text is labelled as untrusted historical data. Provenance records
+the method, source digest and size, structural input size and turn loss, and model/response identity.
+It separately reports turns admitted to structural input and turns available to the final summary.
+The `CONTEXT_ASSEMBLED` event records selected/omitted turn counts, budget use, knowledge keys, and
+summary identity.
 
 The deterministic context suite measures old-constraint retention, recovery from an oversized full
-history by trimming, and a known loss case caused by a deliberately small structural summary input.
-The loss case passing means the regression is visible and stable, not that compaction is lossless.
+history by trimming, and explicit whole-turn loss under a deliberately small structural input budget.
+The loss case passes only when the omitted structural-turn count is observable; compaction remains
+lossy but no longer creates partial semantic records.
 
 ## Dependency Rules
 
@@ -342,6 +351,7 @@ WorkflowRunner -> WorkflowDefinition + CheckpointStore + RunContext + RunEvent
 JSON checkpoint store -> WorkflowCheckpoint + local filesystem
 ContextBuilder -> PromptAssembler + optional ConversationSummarizer + neutral models
 JSON session store -> SessionSnapshot + local filesystem
+ContextBuilder + SessionSnapshot -> transcript validator + neutral models
 ContextEvaluationRunner -> ContextBuilder + neutral models
 ```
 

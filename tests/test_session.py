@@ -1,6 +1,7 @@
 import json
 from dataclasses import replace
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 
@@ -39,7 +40,14 @@ def test_in_memory_session_store_uses_compare_and_swap_revisions() -> None:
     store = InMemorySessionStore()
     first = store.save(make_snapshot(), expected_revision=None)
     second = store.save(
-        replace(first, transcript=(*first.transcript, Message(Role.USER, "Next"))),
+        replace(
+            first,
+            transcript=(
+                *first.transcript,
+                Message(Role.USER, "Next"),
+                Message(Role.ASSISTANT, "Done"),
+            ),
+        ),
         expected_revision=first.revision,
     )
 
@@ -90,3 +98,26 @@ def test_session_snapshot_rejects_unknown_schema_and_naive_timestamp() -> None:
 
     with pytest.raises(ValueError, match="timezone-aware"):
         replace(make_snapshot(), created_at=datetime.now())
+
+
+def test_session_snapshot_rejects_incomplete_durable_turn() -> None:
+    with pytest.raises(ValueError, match="must end with an assistant message"):
+        SessionSnapshot("incomplete", (Message(Role.USER, "not committed"),))
+
+
+def test_json_store_cleanup_does_not_mask_write_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail_write(*args: object, **kwargs: object) -> int:
+        del args, kwargs
+        raise OSError("write failed")
+
+    def fail_cleanup(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise OSError("cleanup failed")
+
+    monkeypatch.setattr(Path, "write_text", fail_write)
+    monkeypatch.setattr(Path, "unlink", fail_cleanup)
+
+    with pytest.raises(SessionError, match="write failed"):
+        JsonFileSessionStore(tmp_path).save(make_snapshot(), expected_revision=None)

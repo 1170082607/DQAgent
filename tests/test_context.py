@@ -1,3 +1,4 @@
+import json
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from dqagent.context import (
     PromptAssembler,
     PromptSection,
     SummaryMethod,
+    _structural_compact,
 )
 from dqagent.errors import ContextError, ContextOverflowError, LLMProviderError
 from dqagent.execution import RunContext
@@ -77,7 +79,7 @@ def test_context_trims_only_complete_turns_and_preserves_tool_pairing() -> None:
         Message(Role.ASSISTANT, "A" * 140),
     )
     transcript = (
-        *completed_turn("old " + "x" * 120, "constraint=KEEP " + "y" * 120),
+        *completed_turn("old", "constraint=KEEP"),
         *tool_turn,
     )
     builder = ContextBuilder(
@@ -87,6 +89,7 @@ def test_context_trims_only_complete_turns_and_preserves_tool_pairing() -> None:
             reserved_characters=50,
             summary_max_characters=160,
             structural_input_max_characters=500,
+            min_recent_turns=0,
         ),
     )
 
@@ -99,6 +102,16 @@ def test_context_trims_only_complete_turns_and_preserves_tool_pairing() -> None:
     assert window.omitted_turns >= 1
     assert window.summary is not None
     assert window.summary.method is SummaryMethod.STRUCTURAL
+    assert window.summary.structural_input_turns == 1
+    assert window.summary.structural_omitted_turns == 1
+    assert window.summary.summary_source_turns == 1
+    assert window.summary.summary_omitted_turns == 1
+    summary = next(
+        item
+        for item in window.items
+        if isinstance(item, Message) and "context-summary" in item.content
+    )
+    assert json.loads(summary.content.splitlines()[-1])["turn"] == 1
     assert window.estimated_characters <= window.max_characters
 
 
@@ -117,12 +130,13 @@ def test_model_summary_receives_bounded_structural_input_and_records_provenance(
             reserved_characters=20,
             summary_max_characters=100,
             structural_input_max_characters=120,
+            min_recent_turns=0,
         ),
         summarizer=LLMConversationSummarizer(llm),
     )
     transcript = (
-        *completed_turn("remember ALPHA " + "x" * 180, "noted " + "y" * 180),
-        *completed_turn("middle " + "m" * 100, "done " + "n" * 100),
+        *completed_turn("remember ALPHA", "noted"),
+        *completed_turn("middle " + "m" * 200, "done " + "n" * 200),
     )
 
     window = builder.build(transcript, Message(Role.USER, "what is the constraint?"))
@@ -131,6 +145,7 @@ def test_model_summary_receives_bounded_structural_input_and_records_provenance(
     summary_input = llm.requests[0][1]
     assert isinstance(summary_input, Message)
     assert len(summary_input.content) <= 120
+    assert json.loads(summary_input.content)["items"][0]["content"] == "remember ALPHA"
     assert window.summary is not None
     assert window.summary.method is SummaryMethod.MODEL
     assert window.summary.model == "summary-model"
@@ -155,11 +170,77 @@ def test_context_rejects_mandatory_overflow_and_invalid_tool_pairing() -> None:
         builder.build(invalid, Message(Role.USER, "next"))
 
 
+def test_minimum_recent_turns_counts_completed_history() -> None:
+    builder = ContextBuilder(
+        PromptAssembler(),
+        ContextBudget(
+            max_characters=220,
+            reserved_characters=20,
+            summary_max_characters=0,
+            min_recent_turns=1,
+        ),
+    )
+    transcript = completed_turn("u" * 100, "a" * 100)
+
+    with pytest.raises(ContextOverflowError, match="required recent conversation"):
+        builder.build(transcript, Message(Role.USER, "current"))
+
+
 def test_model_summarizer_rejects_tool_call_completion() -> None:
     llm = SummaryLLM(Completion(tool_calls=(ToolCall("call-1", "bad", "{}"),)))
 
     with pytest.raises(LLMProviderError, match="requires a text completion"):
         LLMConversationSummarizer(llm).summarize("source", max_characters=100)
+
+
+def test_model_summarizer_rejects_oversized_text_completion() -> None:
+    llm = SummaryLLM(Completion("x" * 101))
+
+    with pytest.raises(ContextError, match="exceeded its output character limit"):
+        LLMConversationSummarizer(llm).summarize("source", max_characters=100)
+
+
+def test_structural_compaction_keeps_turn_and_tool_records_atomic() -> None:
+    tool_turn: tuple[ConversationItem, ...] = (
+        Message(Role.USER, "look up the policy"),
+        ToolCall("call-1", "lookup", '{"query":"policy"}'),
+        ToolResult("call-1", "lookup", "deployment denied"),
+        Message(Role.ASSISTANT, "Do not deploy."),
+    )
+    complete = _structural_compact((tool_turn,), 10_000)
+
+    too_small = _structural_compact((tool_turn,), len(complete.content) - 1)
+
+    assert too_small.content == ""
+    assert too_small.included_turns == 0
+    assert too_small.omitted_turns == 1
+    record = json.loads(complete.content)
+    assert [item["type"] for item in record["items"] if "type" in item] == [
+        "tool_call",
+        "tool_result",
+    ]
+
+
+def test_disabling_summaries_reuses_the_reserved_space_for_complete_turns() -> None:
+    transcript = (
+        *completed_turn("first " + "x" * 35, "answer " + "y" * 35),
+        *completed_turn("second " + "m" * 35, "answer " + "n" * 35),
+    )
+    builder = ContextBuilder(
+        PromptAssembler(),
+        ContextBudget(
+            max_characters=270,
+            reserved_characters=20,
+            summary_max_characters=0,
+            min_recent_turns=0,
+        ),
+    )
+
+    window = builder.build(transcript, Message(Role.USER, "current"))
+
+    assert window.summary is None
+    assert window.retained_turns == 2
+    assert window.omitted_turns == 1
 
 
 def test_file_knowledge_source_enforces_root_and_reports_missing_file(tmp_path: Path) -> None:

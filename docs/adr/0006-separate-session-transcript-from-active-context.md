@@ -17,10 +17,11 @@ last-writer-wins would silently lose a completed turn.
 
 ## Decision
 
-`SessionSnapshot` stores the complete provider-neutral transcript under a session ID and monotonically
-increasing revision. Session stores use compare-and-swap. The in-memory and JSON implementations
-serialize callers through a process-local lock; the JSON implementation hashes IDs into filenames and
-uses atomic replacement. A stale owner receives `SessionConflictError` instead of overwriting data.
+`SessionSnapshot` stores and validates the complete provider-neutral transcript under a session ID and
+monotonically increasing revision. Session stores use compare-and-swap. The in-memory and JSON
+implementations serialize callers through a process-local lock; the JSON implementation hashes IDs
+into filenames and uses atomic replacement. A stale owner receives `SessionConflictError` instead of
+overwriting data.
 
 `SessionAgentApplication` loads one revision, asks `ContextBuilder` for a bounded model view, runs the
 existing `AgentRuntime`, and appends only the current user message plus `AgentRunResult.new_items`.
@@ -33,18 +34,21 @@ There is no automatic repository scan or bulk instruction injection.
 
 `ContextBuilder` estimates serialized character size because the provider-neutral layer has no shared
 tokenizer. The budget includes a caller-configured reserve for tool schemas, output, and tokenizer
-error. It retains a configured number of recent complete turns, then adds older complete turns newest
-first while space remains. Omitted turns are first rendered into a bounded structural form. That form
-can be used directly or passed to an optional model summarizer.
+error. It always retains the active user request plus a configured number of recent completed turns,
+then adds older complete turns newest first while space remains. Omitted turns are rendered as bounded
+JSON Lines with one complete turn per record. A record that cannot fit is omitted rather than cut. The
+structural form can be used directly or passed to an optional model summarizer.
 
 Every inserted summary records method, source SHA-256, source item/character counts, structural input
-size, and provider response/model identity when available. `CONTEXT_ASSEMBLED` exposes bounded context
-metrics on the normal run event stream.
+size, structural and final-summary turn coverage, and provider response/model identity when available.
+Summary text that exceeds its contract is rejected rather than truncated. `CONTEXT_ASSEMBLED` exposes
+bounded context metrics on the normal run event stream.
 
 ## Consequences
 
 - Session storage remains lossless for successful turns even when active context is lossy.
 - Tool-call/tool-result pairs are kept or omitted as part of a complete turn.
+- Structural records and summary drafts are never silently truncated inside a turn or text response.
 - Mandatory prompt sections plus recent turns fail with `ContextOverflowError` instead of silently
   truncating the current request.
 - Structural and model summaries are inspectable projections, not trusted durable facts.

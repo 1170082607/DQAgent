@@ -124,7 +124,7 @@ class SessionAgentApplication:
         *,
         session_id: str | None = None,
     ) -> "SessionAgentApplication":
-        resolved_id = session_id or str(uuid4())
+        resolved_id = str(uuid4()) if session_id is None else session_id
         store.save(SessionSnapshot(resolved_id), expected_revision=None)
         return cls(runtime, store, context_builder, resolved_id)
 
@@ -180,8 +180,10 @@ class SessionAgentApplication:
         # authority when separate owners race on the same session revision.
         with self._lock:
             snapshot = self.snapshot
-            run_context = context or self._runtime.create_context(
-                metadata={"session_id": self._session_id}
+            run_context = (
+                context.child(metadata={"session_id": self._session_id})
+                if context is not None
+                else self._runtime.create_context(metadata={"session_id": self._session_id})
             )
             window = self._context_builder.build(
                 snapshot.transcript,

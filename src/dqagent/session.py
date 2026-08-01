@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 from collections.abc import Mapping
+from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,6 +22,7 @@ from dqagent.models import (
     ToolOutcome,
     ToolResult,
 )
+from dqagent.transcript import validate_complete_transcript
 
 SESSION_SCHEMA_VERSION = 1
 _JSON_STORE_LOCKS: dict[Path, Lock] = {}
@@ -47,6 +49,7 @@ class SessionSnapshot:
                 raise ValueError(f"session {label} timestamp must be timezone-aware")
         # Round-tripping validates every item before it reaches a persistence adapter.
         tuple(_item_from_dict(_item_to_dict(item)) for item in self.transcript)
+        validate_complete_transcript(self.transcript)
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -185,11 +188,11 @@ class JsonFileSessionStore:
                 temporary.write_text(rendered, encoding="utf-8")
                 os.replace(temporary, path)
             except OSError as exc:
+                with suppress(OSError):
+                    temporary.unlink(missing_ok=True)
                 raise SessionError(
                     f"cannot save session '{snapshot.session_id}': {exc}"
                 ) from exc
-            finally:
-                temporary.unlink(missing_ok=True)
             return SessionSnapshot.from_dict(saved.to_dict())
 
     def _load_unlocked(self, session_id: str) -> SessionSnapshot | None:

@@ -10,8 +10,8 @@
         ],
         "turns": [
           {
-            "user": "The durable constraint is ALPHA. xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-            "assistant": "I will retain ALPHA. yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+            "user": "The durable constraint is ALPHA.",
+            "assistant": "I will retain ALPHA."
           },
           {
             "user": "Discuss an unrelated middle topic. mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
@@ -21,11 +21,11 @@
         "user_message": "Which durable constraint still applies?"
       },
       "budget": {
-        "max_characters": 620,
+        "max_characters": 650,
         "reserved_characters": 60,
         "summary_max_characters": 180,
-        "structural_input_max_characters": 400,
-        "min_recent_turns": 1
+        "structural_input_max_characters": 600,
+        "min_recent_turns": 0
       },
       "expected": {
         "contains_all": ["ALPHA", "Which durable constraint still applies?"],
@@ -52,12 +52,12 @@
         "max_characters": 480,
         "reserved_characters": 50,
         "summary_max_characters": 100,
-        "structural_input_max_characters": 180
+        "structural_input_max_characters": 180,
+        "min_recent_turns": 0
       },
       "expected": {
         "contains_all": ["LATEST_REQUEST"],
-        "min_omitted_turns": 2,
-        "summary_method": "structural"
+        "min_omitted_turns": 2
       }
     },
     {
@@ -65,8 +65,8 @@
       "input": {
         "turns": [
           {
-            "user": "first old turn aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "assistant": "first response bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            "user": "first old turn",
+            "assistant": "first response"
           },
           {
             "user": "second old turn contains LOSS_MARKER cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
@@ -76,15 +76,18 @@
         "user_message": "Show what remains after bounded structural compaction."
       },
       "budget": {
-        "max_characters": 430,
+        "max_characters": 550,
         "reserved_characters": 50,
-        "summary_max_characters": 80,
-        "structural_input_max_characters": 80
+        "summary_max_characters": 150,
+        "structural_input_max_characters": 200,
+        "min_recent_turns": 0
       },
       "expected": {
         "contains_all": ["Show what remains"],
         "absent_all": ["LOSS_MARKER"],
         "min_omitted_turns": 2,
+        "min_structural_omitted_turns": 1,
+        "min_summary_omitted_turns": 1,
         "summary_method": "structural"
       }
     }

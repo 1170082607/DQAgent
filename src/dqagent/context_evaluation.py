@@ -33,6 +33,8 @@ class ContextEvaluationCase:
     contains_all: tuple[str, ...]
     absent_all: tuple[str, ...]
     min_omitted_turns: int
+    min_structural_omitted_turns: int
+    min_summary_omitted_turns: int
     summary_method: SummaryMethod | None
 
 
@@ -58,6 +60,10 @@ class ContextEvaluationResult:
     max_characters: int
     retained_turns: int
     omitted_turns: int
+    structural_input_turns: int
+    structural_omitted_turns: int
+    summary_source_turns: int
+    summary_omitted_turns: int
     summary_method: SummaryMethod | None
     checks: tuple[ContextEvaluationCheck, ...]
 
@@ -94,6 +100,10 @@ class ContextEvaluationReport:
                         "max_characters": result.max_characters,
                         "retained_turns": result.retained_turns,
                         "omitted_turns": result.omitted_turns,
+                        "structural_input_turns": result.structural_input_turns,
+                        "structural_omitted_turns": result.structural_omitted_turns,
+                        "summary_source_turns": result.summary_source_turns,
+                        "summary_omitted_turns": result.summary_omitted_turns,
                         "summary_method": (
                             result.summary_method.value if result.summary_method else None
                         ),
@@ -135,6 +145,14 @@ class ContextEvaluationRunner:
         missing = [value for value in case.contains_all if value not in rendered]
         unexpectedly_present = [value for value in case.absent_all if value in rendered]
         actual_method = window.summary.method if window.summary else None
+        structural_input_turns = (
+            window.summary.structural_input_turns if window.summary else 0
+        )
+        structural_omitted_turns = (
+            window.summary.structural_omitted_turns if window.summary else 0
+        )
+        summary_source_turns = window.summary.summary_source_turns if window.summary else 0
+        summary_omitted_turns = window.summary.summary_omitted_turns if window.summary else 0
         checks = (
             ContextEvaluationCheck(
                 "context.contains_all",
@@ -161,6 +179,18 @@ class ContextEvaluationRunner:
                 f"observed {window.omitted_turns}, minimum {case.min_omitted_turns}",
             ),
             ContextEvaluationCheck(
+                "context.min_structural_omitted_turns",
+                structural_omitted_turns >= case.min_structural_omitted_turns,
+                "observed "
+                f"{structural_omitted_turns}, minimum "
+                f"{case.min_structural_omitted_turns}",
+            ),
+            ContextEvaluationCheck(
+                "context.min_summary_omitted_turns",
+                summary_omitted_turns >= case.min_summary_omitted_turns,
+                f"observed {summary_omitted_turns}, minimum {case.min_summary_omitted_turns}",
+            ),
+            ContextEvaluationCheck(
                 "context.summary_method",
                 actual_method is case.summary_method,
                 (
@@ -177,6 +207,10 @@ class ContextEvaluationRunner:
             max_characters=window.max_characters,
             retained_turns=window.retained_turns,
             omitted_turns=window.omitted_turns,
+            structural_input_turns=structural_input_turns,
+            structural_omitted_turns=structural_omitted_turns,
+            summary_source_turns=summary_source_turns,
+            summary_omitted_turns=summary_omitted_turns,
             summary_method=actual_method,
             checks=checks,
         )
@@ -230,6 +264,12 @@ def _parse_case(data: dict[str, Any]) -> ContextEvaluationCase:
         contains_all=tuple(cast(list[str], raw_expected.get("contains_all", []))),
         absent_all=tuple(cast(list[str], raw_expected.get("absent_all", []))),
         min_omitted_turns=cast(int, raw_expected.get("min_omitted_turns", 0)),
+        min_structural_omitted_turns=cast(
+            int, raw_expected.get("min_structural_omitted_turns", 0)
+        ),
+        min_summary_omitted_turns=cast(
+            int, raw_expected.get("min_summary_omitted_turns", 0)
+        ),
         summary_method=SummaryMethod(raw_method) if raw_method is not None else None,
     )
 
@@ -295,7 +335,7 @@ _CONTEXT_EVALUATION_SCHEMA: dict[str, object] = {
                                 "type": "integer",
                                 "minimum": 1,
                             },
-                            "min_recent_turns": {"type": "integer", "minimum": 1},
+                            "min_recent_turns": {"type": "integer", "minimum": 0},
                         },
                     },
                     "expected": {
@@ -311,6 +351,14 @@ _CONTEXT_EVALUATION_SCHEMA: dict[str, object] = {
                                 "items": {"type": "string", "minLength": 1},
                             },
                             "min_omitted_turns": {"type": "integer", "minimum": 0},
+                            "min_structural_omitted_turns": {
+                                "type": "integer",
+                                "minimum": 0,
+                            },
+                            "min_summary_omitted_turns": {
+                                "type": "integer",
+                                "minimum": 0,
+                            },
                             "summary_method": {
                                 "enum": [method.value for method in SummaryMethod]
                             },

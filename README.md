@@ -58,8 +58,8 @@ and context regression evaluation. Phase 7 will add retrieval-augmented generati
 - In-memory and atomic local JSON session stores with explicit process-local concurrency semantics.
 - Named prompt sections and allowlisted project knowledge loaded only by requested key.
 - Character-estimated context budgets with a reserve for tool schemas, output, and tokenizer error.
-- Whole-turn trimming that preserves tool-call/tool-result pairing.
-- Bounded structural compaction and optional model summaries with source provenance.
+- Whole-turn trimming and JSONL structural compaction that never emit partial tool records.
+- Optional structural/model summaries with source, size, and compaction-loss provenance.
 - `CONTEXT_ASSEMBLED` events with budget, retained/omitted turn, knowledge, and summary metadata.
 - A deterministic context evaluation suite for constraint retention, overflow recovery, and known
   compaction loss.
