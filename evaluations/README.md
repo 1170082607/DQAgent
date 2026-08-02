@@ -1,8 +1,9 @@
 # Behavioral Evaluations
 
-This directory contains versioned behavioral and context cases with committed baseline reports.
+This directory contains versioned behavioral, context, and retrieval cases with committed baseline
+reports.
 Evaluations are kept separate from `tests/`: tests verify deterministic implementation contracts,
-while evaluations measure agent outcomes or the quality of a bounded model-context projection.
+while evaluations measure agent outcomes, bounded model-context projections, or retrieval ranking.
 
 ## Case Contract
 
@@ -62,3 +63,15 @@ and local inference have materially different operational envelopes.
 `baselines/phase-6-context-deterministic-v1.json` records the Phase 6 result. The loss case passes only
 when the omitted marker is absent and `structural_omitted_turns` reports the dropped complete record;
 it does not claim compaction is lossless.
+
+`cases/phase-7-retrieval-v1.json` indexes a small fixture corpus through the production ingestion
+pipeline, then measures `Recall@k` and reciprocal rank through the production retriever:
+
+```bash
+dqagent-retrieval-eval --output .local/evaluations/retrieval-report.json
+```
+
+`baselines/phase-7-retrieval-deterministic-v1.json` records the credential-free hashing-embedding
+baseline. Its perfect score on four lexical fixture queries proves deterministic regression behavior,
+not general semantic retrieval quality. Replacing the embedding implementation or corpus requires a
+new suite/baseline rather than silently rewriting this evidence.

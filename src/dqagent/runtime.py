@@ -141,6 +141,20 @@ class AgentRuntime:
             },
         )
         if context_attributes is not None:
+            if context_attributes.get("retrieval_query") is not None:
+                emitter.emit(
+                    RunEventType.RETRIEVAL_COMPLETED,
+                    RunState.RUNNING,
+                    {
+                        key: context_attributes[key]
+                        for key in (
+                            "retrieval_query",
+                            "retrieved_chunk_count",
+                            "retrieved_chunk_ids",
+                            "retrieval_scores",
+                        )
+                    },
+                )
             emitter.emit(
                 RunEventType.CONTEXT_ASSEMBLED,
                 RunState.RUNNING,

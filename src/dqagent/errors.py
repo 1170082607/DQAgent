@@ -114,3 +114,9 @@ class ContextOverflowError(ContextError):
     """Raised when mandatory prompt content cannot fit the configured budget."""
 
     category = ErrorCategory.CONTEXT_LIMIT
+
+
+class RetrievalError(DQAgentError):
+    """Raised when knowledge ingestion, indexing, or retrieval cannot complete."""
+
+    category = ErrorCategory.UNAVAILABLE

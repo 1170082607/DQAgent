@@ -9,6 +9,14 @@ from dqagent.errors import LLMProviderError, SessionConflictError, SessionNotFou
 from dqagent.events import RunEventType
 from dqagent.execution import RunContext
 from dqagent.models import Completion, ConversationItem, Message, Role, ToolDefinition
+from dqagent.retrieval import (
+    CharacterTextChunker,
+    DocumentIngestor,
+    HashingEmbeddingProvider,
+    InMemoryVectorStore,
+    SourceDocument,
+    VectorRetriever,
+)
 from dqagent.runtime import AgentRuntime, RetryPolicy
 from dqagent.session import InMemorySessionStore, SessionSnapshot
 from dqagent.tools import ToolRegistry
@@ -198,3 +206,81 @@ def test_supplied_run_context_adds_authoritative_session_metadata() -> None:
         "tenant": "acme",
         "session_id": "actual-session",
     }
+
+
+def test_retrieval_is_transient_cited_and_observable() -> None:
+    store = InMemorySessionStore()
+    vector_store = InMemoryVectorStore()
+    embeddings = HashingEmbeddingProvider(64)
+    DocumentIngestor(CharacterTextChunker(), embeddings, vector_store).upsert(
+        SourceDocument(
+            "refund-policy",
+            "Refunds are available within thirty days.",
+            "docs/refunds.md",
+        )
+    )
+    llm = StubLLM([Completion("Refunds take thirty days [R1].")])
+    app = SessionAgentApplication.create(
+        make_runtime(llm),
+        store,
+        make_builder(),
+        session_id="rag",
+        retriever=VectorRetriever(embeddings, vector_store),
+        retrieval_limit=1,
+    )
+
+    result = app.run("When are refunds available?")
+
+    assert result.retrieval is not None
+    assert result.retrieval.citations["R1"].source == "docs/refunds.md"
+    assert result.citations is not None
+    assert tuple(result.citations.cited) == ("R1",)
+    assert result.citations.unknown_ids == ()
+    system_content = [
+        item.content
+        for item in llm.requests[0]
+        if isinstance(item, Message) and item.role is Role.SYSTEM
+    ]
+    assert any("untrusted external data" in content for content in system_content)
+    assert any("[R1 source=" in content and "thirty days" in content for content in system_content)
+    assert not any(
+        isinstance(item, Message) and item.role is Role.SYSTEM
+        for item in result.session.transcript
+    )
+    context_event = next(
+        event
+        for event in result.agent.events
+        if event.type is RunEventType.CONTEXT_ASSEMBLED
+    )
+    assert context_event.attributes["retrieved_chunk_count"] == 1
+    assert context_event.attributes["retrieved_chunk_ids"] == [
+        result.retrieval.chunks[0].chunk.chunk_id
+    ]
+    assert [event.type for event in result.agent.events[:3]] == [
+        RunEventType.RUN_STARTED,
+        RunEventType.RETRIEVAL_COMPLETED,
+        RunEventType.CONTEXT_ASSEMBLED,
+    ]
+
+
+def test_empty_retrieval_is_explicit_and_does_not_fail_run() -> None:
+    vector_store = InMemoryVectorStore()
+    embeddings = HashingEmbeddingProvider(64)
+    llm = StubLLM([Completion("External evidence is insufficient.")])
+    app = SessionAgentApplication.create(
+        make_runtime(llm),
+        InMemorySessionStore(),
+        make_builder(),
+        session_id="empty-rag",
+        retriever=VectorRetriever(embeddings, vector_store),
+    )
+
+    result = app.run("Unknown fact?")
+
+    assert result.retrieval is not None and result.retrieval.chunks == ()
+    assert any(
+        isinstance(item, Message)
+        and item.role is Role.SYSTEM
+        and "No external sources were retrieved" in item.content
+        for item in llm.requests[0]
+    )

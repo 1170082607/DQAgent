@@ -181,20 +181,26 @@ now." They must remain separate responsibilities.
 
 ### Phase 7: Retrieval-Augmented Generation
 
-**Status:** Next
+**Status:** Complete
 
 **Outcome:** Ground answers in external knowledge with measurable retrieval quality.
 
-- Build an ingestion pipeline with document identity, chunking, metadata, and update/delete
+- [x] Build an ingestion pipeline with document identity, chunking, metadata, and update/delete
   behavior.
-- Define provider-neutral embedding and retrieval boundaries only when concrete implementations
+- [x] Define provider-neutral embedding and retrieval boundaries only when concrete implementations
   exist.
-- Start with a small local store and explicit indexing lifecycle.
-- Return provenance with retrieved content and preserve citations through the answer path.
-- Evaluate retrieval independently with recall-oriented metrics before evaluating generated answers.
-- Address stale data, duplicate chunks, prompt injection in retrieved content, and empty retrieval.
+- [x] Start with a small local store and explicit indexing lifecycle.
+- [x] Return provenance with retrieved content and preserve citations through the answer path.
+- [x] Evaluate retrieval independently with recall-oriented metrics before evaluating generated
+  answers.
+- [x] Address stale data, duplicate chunks, prompt injection in retrieved content, and empty
+  retrieval.
 
 RAG is an external knowledge service. It is not conversation history or long-term user memory.
+
+The first embedding implementation is deterministic feature hashing for a credential-free baseline.
+It validates the provider boundary and index lifecycle but is lexical rather than semantic. A real
+embedding provider and scalable vector store require a concrete corpus and a new measured baseline.
 
 ### Phase 8: Long-Term Memory
 

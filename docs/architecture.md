@@ -2,8 +2,8 @@
 
 ## Status
 
-This document describes the implemented Phase 6 architecture. Retrieval, long-term memory, hard
-execution isolation, and other future capabilities remain in the [roadmap](roadmap.md).
+This document describes the implemented Phase 7 architecture. Long-term memory, hard execution
+isolation, and other future capabilities remain in the [roadmap](roadmap.md).
 
 ## System Context
 
@@ -160,6 +160,7 @@ UTC timestamp, elapsed seconds, and structured attributes. Current event types c
 - Model request start, completion, and failure for each attempt.
 - Scheduled retry and backoff duration.
 - Tool-call processing start and completion.
+- Retrieval completion with query, result count, chunk IDs, and scores.
 - Context assembly with budget, turn selection, knowledge keys, and summary provenance.
 - Workflow node, transition, checkpoint, interruption, and resume activity.
 
@@ -336,6 +337,53 @@ history by trimming, and explicit whole-turn loss under a deliberately small str
 The loss case passes only when the omitted structural-turn count is observable; compaction remains
 lossy but no longer creates partial semantic records.
 
+## Retrieval-Augmented Generation
+
+`SourceDocument` defines an external source revision through document identity, content, citation
+source, and metadata. `CharacterTextChunker` creates bounded whitespace-aware chunks with overlap,
+source offsets, a content digest, and stable document-scoped chunk IDs. `DocumentIngestor` removes
+exact duplicates within a document, embeds the remaining chunks, and replaces the complete indexed
+view for that document. Updating a shorter document therefore removes stale old chunks; deletion is
+an explicit lifecycle operation.
+
+`EmbeddingProvider` and `VectorStore` are neutral protocols backed by concrete local implementations.
+`HashingEmbeddingProvider` maps case-folded tokens through deterministic feature hashing and L2
+normalization. It needs lexical overlap and can have hash collisions; it is a CI-capable architecture
+baseline, not a semantic embedding model. Each `IndexedChunk` stores its embedding provider identity.
+The retriever rejects an incompatible index rather than comparing vectors from different spaces.
+
+The in-memory store is thread-safe and test-oriented. `JsonFileVectorStore` holds a versioned complete
+index and uses atomic replacement under a process-local lock. Each update rewrites and each query loads
+the complete index, so it is intentionally limited to a small local corpus. It has no cross-process
+coordination, approximate-nearest-neighbor structure, index migration, or history.
+
+`VectorRetriever` embeds the query, ranks normalized vectors by dot product, filters by a positive
+default score, applies deterministic ties, folds exact cross-document content duplicates by digest,
+and returns rank-local citation IDs with full chunk provenance. An empty index or no score above the
+threshold returns an explicit empty result instead of an error.
+
+When configured, `SessionAgentApplication` retrieves from the current user input before context
+construction:
+
+```text
+durable transcript + user query -> retrieve -> untrusted citation-labelled prompt passages
+                               -> bounded ContextBuilder -> AgentRuntime -> answer + citation map
+                               -> commit only user/agent conversation items
+```
+
+The retrieval policy tells the model that passages are untrusted data and factual claims should use
+bracket citations such as `[R1]`. Delimiting data reduces accidental instruction following but is not
+a hard prompt-injection sandbox. Retrieved passages, scores, and policies remain transient and do not
+enter the session transcript. `SessionRunResult` retains the complete retrieval result and resolves
+answer IDs into cited sources, retrieved-but-uncited IDs, and unknown IDs. Resolution is evidence for
+callers and evaluation; it does not fail a completed model answer. `RETRIEVAL_COMPLETED` and
+`CONTEXT_ASSEMBLED` expose query, count, chunk IDs, and scores on the run event stream. Retrieval
+failures occur before the model request and transcript commit.
+
+The retrieval evaluation runner indexes fixture documents through the production pipeline and
+measures `Recall@k` and reciprocal rank before generation. This isolates ranking regressions from
+model citation faithfulness. The Phase 7 fixture baseline is intentionally lexical and small.
+
 ## Dependency Rules
 
 ```text
@@ -353,6 +401,10 @@ ContextBuilder -> PromptAssembler + optional ConversationSummarizer + neutral mo
 JSON session store -> SessionSnapshot + local filesystem
 ContextBuilder + SessionSnapshot -> transcript validator + neutral models
 ContextEvaluationRunner -> ContextBuilder + neutral models
+DocumentIngestor -> DocumentChunker + EmbeddingProvider + VectorStore
+VectorRetriever -> EmbeddingProvider + VectorStore
+SessionAgentApplication -> Retriever + ContextBuilder + SessionStore + AgentRuntime
+RetrievalEvaluationRunner -> DocumentIngestor + VectorRetriever
 ```
 
 - Session state is owned above the runtime; one run cannot commit partial history.
@@ -363,7 +415,8 @@ ContextEvaluationRunner -> ContextBuilder + neutral models
 - Evaluation observes production-owned results and events; it cannot implement alternate execution.
 - Workflow nodes depend on shared execution contracts, not provider SDKs or CLI state.
 - Checkpoint stores persist scheduler state but do not own workflow transitions or external effects.
-- Retrieval, memory, and multi-agent modules are not introduced before their phases.
+- Retrieval content is request-scoped external data, not durable session state or long-term memory.
+- Memory and multi-agent modules are not introduced before their phases.
 
 ## Configuration
 
@@ -392,6 +445,8 @@ the runtime's model-attempt budget and defaults to three. All values are validat
   separation of transient summaries from durable history.
 - Context tests assert prompt ownership, allowlisted on-demand knowledge, whole-turn trimming, tool
   pairing, structural/model summary provenance, overflow errors, and deterministic context reports.
+- Retrieval tests assert exact offsets, update/delete behavior, duplicate folding, embedding identity,
+  atomic JSON persistence, empty retrieval, citation propagation, prompt isolation, and ranking reports.
 - CI runs Ruff, strict mypy, and pytest with at least 85% coverage.
 - CI also runs the credential-free deterministic behavioral suite after implementation tests.
 
@@ -410,7 +465,10 @@ nondeterminism make it an unsuitable correctness gate.
   distributed lease, append-only history, migration framework, tenant isolation, or retention policy.
 - Context budgets estimate characters rather than provider tokens. Structural and model summaries
   are lossy, and model summarization adds a provider call before the main agent run.
-- There is no approval policy, retrieval index, or cross-session long-term memory.
+- There is no approval policy or cross-session long-term memory.
+- The retrieval store is small, synchronous, single-process, and brute-force. Hashing embeddings are
+  lexical, exact digest deduplication misses near-duplicates, and citation use is not yet validated on
+  generated answers.
 - JSON file checkpoints retain only the latest revision and coordinate one process. There is no
   distributed lease, checkpoint history, migration framework, or multi-worker recovery.
 - Workflows reject cycles, nested parallel subgraphs, dynamic graph mutation, and conflicting branch
@@ -429,8 +487,10 @@ nondeterminism make it an unsuitable correctness gate.
 - [ADR-0004: Separate Evaluation Harness from Agent Execution](adr/0004-evaluation-harness-boundary.md)
 - [ADR-0005: Checkpoint Deterministic Workflow Progress at Node Boundaries](adr/0005-checkpointed-deterministic-workflow.md)
 - [ADR-0006: Separate Durable Session Transcripts from Active Model Context](adr/0006-separate-session-transcript-from-active-context.md)
+- [ADR-0007: Use an Explicit Retrieval Index and Citation Boundary](adr/0007-explicit-retrieval-index-and-citation-boundary.md)
 - [Phase 2 Framework Comparison](learning/phase-2-framework-comparison.md)
 - [Roadmap Reassessment After Phase 3](learning/roadmap-reassessment-after-phase-3.md)
 - [Phase 4 BFCL and GAIA Comparison](learning/phase-4-bfcl-gaia-comparison.md)
 - [Phase 5 LangGraph and EINO Workflow Comparison](learning/phase-5-langgraph-eino-workflow-comparison.md)
 - [Phase 6 Session and Context Comparison](learning/phase-6-session-context-comparison.md)
+- [Phase 7 Retrieval Framework Comparison](learning/phase-7-retrieval-framework-comparison.md)

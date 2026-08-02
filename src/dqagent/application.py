@@ -10,6 +10,12 @@ from dqagent.errors import LLMProviderError, SessionNotFoundError
 from dqagent.execution import RunContext
 from dqagent.llm import LLMClient
 from dqagent.models import ConversationItem, Message, Role
+from dqagent.retrieval import (
+    CitationResolution,
+    RetrievalResult,
+    Retriever,
+    resolve_answer_citations,
+)
 from dqagent.runtime import AgentRunResult, AgentRuntime
 from dqagent.session import SessionSnapshot, SessionStore
 
@@ -91,10 +97,17 @@ class SessionRunResult:
     agent: AgentRunResult
     session: SessionSnapshot
     context_window: ContextWindow
+    retrieval: RetrievalResult | None = None
 
     @property
     def output(self) -> Message:
         return self.agent.output
+
+    @property
+    def citations(self) -> CitationResolution | None:
+        if self.retrieval is None:
+            return None
+        return resolve_answer_citations(self.output.content, self.retrieval)
 
 
 class SessionAgentApplication:
@@ -106,6 +119,10 @@ class SessionAgentApplication:
         store: SessionStore,
         context_builder: ContextBuilder,
         session_id: str,
+        *,
+        retriever: Retriever | None = None,
+        retrieval_limit: int = 5,
+        retrieval_min_score: float = 0.05,
     ) -> None:
         if not session_id.strip():
             raise ValueError("session ID must not be empty")
@@ -113,6 +130,11 @@ class SessionAgentApplication:
         self._store = store
         self._context_builder = context_builder
         self._session_id = session_id
+        if retrieval_limit < 1:
+            raise ValueError("retrieval limit must be positive")
+        self._retriever = retriever
+        self._retrieval_limit = retrieval_limit
+        self._retrieval_min_score = retrieval_min_score
         self._lock = Lock()
 
     @classmethod
@@ -123,10 +145,21 @@ class SessionAgentApplication:
         context_builder: ContextBuilder,
         *,
         session_id: str | None = None,
+        retriever: Retriever | None = None,
+        retrieval_limit: int = 5,
+        retrieval_min_score: float = 0.05,
     ) -> "SessionAgentApplication":
         resolved_id = str(uuid4()) if session_id is None else session_id
         store.save(SessionSnapshot(resolved_id), expected_revision=None)
-        return cls(runtime, store, context_builder, resolved_id)
+        return cls(
+            runtime,
+            store,
+            context_builder,
+            resolved_id,
+            retriever=retriever,
+            retrieval_limit=retrieval_limit,
+            retrieval_min_score=retrieval_min_score,
+        )
 
     @classmethod
     def resume(
@@ -135,10 +168,22 @@ class SessionAgentApplication:
         store: SessionStore,
         context_builder: ContextBuilder,
         session_id: str,
+        *,
+        retriever: Retriever | None = None,
+        retrieval_limit: int = 5,
+        retrieval_min_score: float = 0.05,
     ) -> "SessionAgentApplication":
         if store.load(session_id) is None:
             raise SessionNotFoundError(f"session not found: {session_id!r}")
-        return cls(runtime, store, context_builder, session_id)
+        return cls(
+            runtime,
+            store,
+            context_builder,
+            session_id,
+            retriever=retriever,
+            retrieval_limit=retrieval_limit,
+            retrieval_min_score=retrieval_min_score,
+        )
 
     @property
     def session_id(self) -> str:
@@ -185,10 +230,20 @@ class SessionAgentApplication:
                 if context is not None
                 else self._runtime.create_context(metadata={"session_id": self._session_id})
             )
+            retrieval = (
+                self._retriever.retrieve(
+                    user_input,
+                    limit=self._retrieval_limit,
+                    min_score=self._retrieval_min_score,
+                )
+                if self._retriever is not None
+                else None
+            )
             window = self._context_builder.build(
                 snapshot.transcript,
                 user_message,
                 knowledge_keys=knowledge_keys,
+                retrieval=retrieval,
                 context=run_context,
             )
             agent_result = self._runtime.run(
@@ -205,4 +260,4 @@ class SessionAgentApplication:
                 ),
             )
             saved = self._store.save(candidate, expected_revision=snapshot.revision)
-            return SessionRunResult(agent_result, saved, window)
+            return SessionRunResult(agent_result, saved, window, retrieval)

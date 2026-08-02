@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "suite_id": "phase-7-retrieval-v1",
+  "config": {
+    "chunk_characters": 180,
+    "chunk_overlap": 20,
+    "embedding_dimensions": 256
+  },
+  "documents": [
+    {
+      "id": "refund-policy",
+      "source": "fixtures/refund-policy.md",
+      "content": "Refund policy: customers may request a refund within thirty calendar days of purchase. A receipt is required."
+    },
+    {
+      "id": "support-hours",
+      "source": "fixtures/support-hours.md",
+      "content": "Support hours: the service desk operates Monday through Friday from 09:00 to 17:00 UTC."
+    },
+    {
+      "id": "deployment-guide",
+      "source": "fixtures/deployment-guide.md",
+      "content": "Deployment guide: production releases require a passing test suite and an approved change record before rollout."
+    },
+    {
+      "id": "security-policy",
+      "source": "fixtures/security-policy.md",
+      "content": "Security policy: API credentials must be stored in the managed secret vault and must never be committed to source control."
+    }
+  ],
+  "cases": [
+    {
+      "id": "refund-window",
+      "query": "What is the refund policy and how many days are allowed?",
+      "relevant_document_ids": ["refund-policy"],
+      "top_k": 2,
+      "min_recall": 1.0,
+      "min_reciprocal_rank": 1.0
+    },
+    {
+      "id": "support-schedule",
+      "query": "When are the support hours for the service desk?",
+      "relevant_document_ids": ["support-hours"],
+      "top_k": 2,
+      "min_recall": 1.0,
+      "min_reciprocal_rank": 1.0
+    },
+    {
+      "id": "deployment-gate",
+      "query": "What does the deployment guide require before a production rollout?",
+      "relevant_document_ids": ["deployment-guide"],
+      "top_k": 2,
+      "min_recall": 1.0,
+      "min_reciprocal_rank": 1.0
+    },
+    {
+      "id": "credential-storage",
+      "query": "According to the security policy, where should API credentials be stored?",
+      "relevant_document_ids": ["security-policy"],
+      "top_k": 2,
+      "min_recall": 1.0,
+      "min_reciprocal_rank": 1.0
+    }
+  ]
+}

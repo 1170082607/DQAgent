@@ -14,6 +14,7 @@ from dqagent.config import ModelProvider, Settings
 from dqagent.context import ContextBudget, ContextBuilder, PromptAssembler, PromptSection
 from dqagent.errors import DQAgentError
 from dqagent.providers import create_llm_client
+from dqagent.retrieval import HashingEmbeddingProvider, JsonFileVectorStore, VectorRetriever
 from dqagent.runtime import AgentRuntime, RetryPolicy
 from dqagent.session import JsonFileSessionStore
 
@@ -28,6 +29,13 @@ def build_parser() -> argparse.ArgumentParser:
         choices=[provider.value for provider in ModelProvider],
         help="Override DQAGENT_PROVIDER.",
     )
+    parser.add_argument(
+        "--retrieval-index",
+        type=Path,
+        help="Enable RAG for a durable session using this local JSON index.",
+    )
+    parser.add_argument("--retrieval-limit", type=int, default=5)
+    parser.add_argument("--retrieval-min-score", type=float, default=0.05)
     parser.add_argument("--model", help="Override DQAGENT_MODEL.")
     parser.add_argument("--system", help="Optional system prompt for this session.")
     parser.add_argument(
@@ -110,6 +118,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         load_dotenv()
         settings = _settings_from_args(args)
+        if args.retrieval_index is not None and args.session_id is None:
+            raise ValueError("--retrieval-index requires --session-id")
         runtime = AgentRuntime(
             create_llm_client(settings),
             create_builtin_tool_registry(),
@@ -125,6 +135,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 PromptAssembler(sections),
                 ContextBudget(max_characters=args.context_max_characters),
             )
+            retriever = (
+                VectorRetriever(
+                    HashingEmbeddingProvider(),
+                    JsonFileVectorStore(args.retrieval_index),
+                )
+                if args.retrieval_index is not None
+                else None
+            )
             app: AgentApplication | SessionAgentApplication
             if store.load(args.session_id) is None:
                 app = SessionAgentApplication.create(
@@ -132,6 +150,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     store,
                     builder,
                     session_id=args.session_id,
+                    retriever=retriever,
+                    retrieval_limit=args.retrieval_limit,
+                    retrieval_min_score=args.retrieval_min_score,
                 )
             else:
                 app = SessionAgentApplication.resume(
@@ -139,6 +160,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     store,
                     builder,
                     args.session_id,
+                    retriever=retriever,
+                    retrieval_limit=args.retrieval_limit,
+                    retrieval_min_score=args.retrieval_min_score,
                 )
         else:
             app = AgentApplication(runtime, system_prompt=args.system)

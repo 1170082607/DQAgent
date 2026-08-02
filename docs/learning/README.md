@@ -20,3 +20,4 @@ to an ADR when it becomes a durable project decision.
 - [Phase 4 Comparison: DQAgent, BFCL, and GAIA](phase-4-bfcl-gaia-comparison.md)
 - [Phase 5 Comparison: DQAgent, LangGraph, and EINO Workflow Execution](phase-5-langgraph-eino-workflow-comparison.md)
 - [Phase 6 Comparison: DQAgent Session and Context Boundaries](phase-6-session-context-comparison.md)
+- [Phase 7 Comparison: DQAgent Retrieval, LangChain, and Chroma](phase-7-retrieval-framework-comparison.md)

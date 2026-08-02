@@ -4,9 +4,9 @@ DQAgent is an engineering-first learning project for building AI Agent capabilit
 from foundational components. Its purpose is to understand the design of production-oriented agent
 systems instead of treating frameworks as black boxes.
 
-**Status:** Pre-alpha. Phase 6 is implemented: DQAgent now supports durable session transcripts,
-bounded active context, prompt sections, on-demand project knowledge, structural/model summaries,
-and context regression evaluation. Phase 7 will add retrieval-augmented generation.
+**Status:** Pre-alpha. Phase 7 is implemented: DQAgent now supports durable bounded sessions plus an
+explicit local RAG lifecycle with document replacement/deletion, provider-neutral embedding and
+retrieval boundaries, citation provenance, and independent retrieval evaluation.
 
 ## Goals
 
@@ -26,7 +26,7 @@ and context regression evaluation. Phase 7 will add retrieval-augmented generati
 - Add abstractions for roadmap stages that have not been implemented.
 - Treat workflow graphs, prompt chains, or additional agents as substitutes for model capability.
 
-## Phase 6 Capabilities
+## Phase 7 Capabilities
 
 - Interactive and one-shot command-line chat.
 - In-memory conversation history with optional system prompts.
@@ -63,10 +63,16 @@ and context regression evaluation. Phase 7 will add retrieval-augmented generati
 - `CONTEXT_ASSEMBLED` events with budget, retained/omitted turn, knowledge, and summary metadata.
 - A deterministic context evaluation suite for constraint retention, overflow recovery, and known
   compaction loss.
+- Document identity, metadata, whitespace-aware chunking, exact duplicate folding, and explicit
+  replace/delete indexing behavior.
+- Provider-neutral embedding, vector-store, and retriever contracts with deterministic local
+  implementations.
+- Citation-labelled untrusted retrieval context that stays separate from durable session history.
+- Retrieval lifecycle events and a committed `Recall@k`/MRR regression baseline.
 - Environment-based configuration with explicit validation.
 - Unit tests, Ruff linting, mypy strict type checking, and GitHub Actions CI.
 
-Streaming, retrieval, cross-session memory, hard execution isolation, approval policy, distributed
+Streaming, cross-session memory, hard execution isolation, approval policy, distributed
 session/workflow leases, durable telemetry delivery, LLM-as-judge, and repeated live-model sampling
 remain deferred. Evaluation, security, durability, and observability remain continuous constraints
 for later phases.
@@ -187,6 +193,30 @@ Run the credential-free Phase 6 context regression suite:
 dqagent-context-eval --output .local/evaluations/context-report.json
 ```
 
+Build a small local retrieval index, inspect it without an LLM, and use it to ground a durable
+session:
+
+```bash
+dqagent-index upsert project-readme README.md --source README.md
+dqagent-index query "How are durable sessions resumed?"
+dqagent --session-id grounded-1 --retrieval-index .local/retrieval/index.json \
+  --message "How are durable sessions resumed? Cite the source."
+```
+
+`upsert` replaces every previous chunk for the same document ID; stale chunks from an older version
+do not remain searchable. Remove a document with `dqagent-index delete project-readme`. The local
+hashing embedding is deterministic and credential-free, but relies on lexical overlap and is not a
+production semantic embedding model. Retrieved passages enter only the active request, are labelled
+as untrusted external data, and are not written to the durable transcript. Answers can cite rank-local
+IDs such as `[R1]`; the application result retains the source, offsets, digest, score, and metadata,
+and separates valid cited IDs from retrieved-but-uncited and unknown answer IDs.
+
+Run the independent retrieval baseline:
+
+```bash
+dqagent-retrieval-eval --output .local/evaluations/retrieval-report.json
+```
+
 Run the durable workflow example. The first process checkpoints and interrupts after `prepare`; the
 second claims the checkpoint and continues from `apply`:
 
@@ -216,6 +246,8 @@ src/dqagent/evaluation.py Behavioral case loader, runner, checks, and reports
 src/dqagent/context.py Prompt assembly, knowledge loading, budgets, and compaction
 src/dqagent/session.py Durable transcript model and session stores
 src/dqagent/context_evaluation.py Deterministic context regression runner
+src/dqagent/retrieval.py Ingestion, embedding, local index, retrieval, and provenance
+src/dqagent/retrieval_evaluation.py Recall-oriented retrieval regression runner
 src/dqagent/workflow.py Deterministic workflow definition and runner
 src/dqagent/checkpoint.py Workflow checkpoint contract and stores
 evaluations/        Versioned cases and committed baseline reports
@@ -235,6 +267,7 @@ mypy src
 pytest
 dqagent-eval --mode deterministic
 dqagent-context-eval
+dqagent-retrieval-eval
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for change guidelines.

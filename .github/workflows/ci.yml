@@ -29,6 +29,8 @@ jobs:
             --output evaluation-report.json
           dqagent-context-eval \
             --output context-evaluation-report.json
+          dqagent-retrieval-eval \
+            --output retrieval-evaluation-report.json
 
       - name: Upload evaluation report
         if: always()
@@ -38,4 +40,5 @@ jobs:
           path: |
             evaluation-report.json
             context-evaluation-report.json
+            retrieval-evaluation-report.json
           retention-days: 30

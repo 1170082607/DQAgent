@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dqagent"
-version = "0.6.0"
+version = "0.7.0"
 description = "An incremental, engineering-first AI Agent learning project."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -29,6 +29,8 @@ dev = [
 dqagent = "dqagent.cli:main"
 dqagent-eval = "dqagent.evaluation_cli:main"
 dqagent-context-eval = "dqagent.context_evaluation_cli:main"
+dqagent-index = "dqagent.retrieval_cli:main"
+dqagent-retrieval-eval = "dqagent.retrieval_evaluation_cli:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
