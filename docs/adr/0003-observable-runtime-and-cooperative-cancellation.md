@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-07-23
+- Lifecycle ownership amended by: [ADR-0008](0008-coordinate-end-to-end-run-above-agent-runtime.md)
 
 ## Context
 
@@ -22,7 +23,9 @@ metadata. The same context is passed to the LLM boundary and every tool handler.
 
 Move the model/tool loop into `AgentRuntime`. `AgentApplication` continues to own conversation state
 and commits only a successful `AgentRunResult`. The runtime owns iteration bounds, repeated-call
-protection, retry policy, lifecycle transitions, and ordered events.
+protection, provider retry policy, and model/tool stage events. ADR-0008 later moves the widened
+end-to-end lifecycle and ordered event stream into an independent `RunCoordinator` so pre-model
+application stages can participate without sharing terminal ownership with the runtime.
 
 Runtime events are immutable records with a run ID, sequence, timestamp, lifecycle state, and typed
 event name. Event sinks are best-effort hooks: sink failures are logged and do not change run

@@ -29,3 +29,4 @@ Start from [0000-template.md](0000-template.md).
 - [ADR-0005: Checkpoint Deterministic Workflow Progress at Node Boundaries](0005-checkpointed-deterministic-workflow.md)
 - [ADR-0006: Separate Durable Session Transcripts from Active Model Context](0006-separate-session-transcript-from-active-context.md)
 - [ADR-0007: Use an Explicit Retrieval Index and Citation Boundary](0007-explicit-retrieval-index-and-citation-boundary.md)
+- [ADR-0008: Coordinate the End-to-End Run Above AgentRuntime](0008-coordinate-end-to-end-run-above-agent-runtime.md)

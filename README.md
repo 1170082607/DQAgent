@@ -65,10 +65,15 @@ retrieval boundaries, citation provenance, and independent retrieval evaluation.
   compaction loss.
 - Document identity, metadata, whitespace-aware chunking, exact duplicate folding, and explicit
   replace/delete indexing behavior.
-- Provider-neutral embedding, vector-store, and retriever contracts with deterministic local
-  implementations.
-- Citation-labelled untrusted retrieval context that stays separate from durable session history.
-- Retrieval lifecycle events and a committed `Recall@k`/MRR regression baseline.
+- Provider-neutral document/query embedding, vector-store, and retriever contracts with deterministic
+  local implementations.
+- Citation-labelled untrusted retrieval data in lower-authority user context, with trusted retrieval
+  policy retained in system context and no retrieved content in durable session history.
+- One coordinator-owned run across retrieval, context, and model/tool work, with stage scopes that
+  cannot start or terminate the lifecycle.
+- Retrieval start, completion, and failure events with a committed `Recall@k`/MRR/no-result suite.
+- A separate live answer-level RAG suite for lexical claim/citation linkage, insufficient evidence,
+  and adversarial retrieved instructions.
 - Environment-based configuration with explicit validation.
 - Unit tests, Ruff linting, mypy strict type checking, and GitHub Actions CI.
 
@@ -215,6 +220,13 @@ Run the independent retrieval baseline:
 
 ```bash
 dqagent-retrieval-eval --output .local/evaluations/retrieval-report.json
+```
+
+Run the separate answer-level RAG suite with the configured live provider. Repeat it before drawing
+model-quality conclusions:
+
+```bash
+dqagent-rag-answer-eval --output .local/evaluations/rag-answer-report.json
 ```
 
 Run the durable workflow example. The first process checkpoints and interrupts after `prepare`; the

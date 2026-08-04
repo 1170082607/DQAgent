@@ -66,6 +66,10 @@ class RunDeadlineExceededError(DQAgentError):
     category = ErrorCategory.DEADLINE_EXCEEDED
 
 
+class RunExecutionError(DQAgentError):
+    """Raised when an unexpected failure escapes the end-to-end run boundary."""
+
+
 class AgentRuntimeError(DQAgentError):
     """Raised when an unexpected failure escapes a runtime boundary."""
 

@@ -64,14 +64,33 @@ and local inference have materially different operational envelopes.
 when the omitted marker is absent and `structural_omitted_turns` reports the dropped complete record;
 it does not claim compaction is lossless.
 
-`cases/phase-7-retrieval-v1.json` indexes a small fixture corpus through the production ingestion
-pipeline, then measures `Recall@k` and reciprocal rank through the production retriever:
+`cases/phase-7-retrieval-v1.json` indexes a discriminating fixture corpus through the production
+ingestion pipeline, then measures `Recall@k`, reciprocal rank, and explicit no-result behavior
+through the production retriever. Cases include multi-chunk documents, lexical distractors,
+paraphrased queries, multiple relevant documents, adversarial passage content, and a no-answer query.
+Every case uses the suite-level score threshold. Recall and reciprocal rank are not applicable to
+no-result cases, so their per-case values are `null` and ranking means exclude them:
 
 ```bash
 dqagent-retrieval-eval --output .local/evaluations/retrieval-report.json
 ```
 
 `baselines/phase-7-retrieval-deterministic-v1.json` records the credential-free hashing-embedding
-baseline. Its perfect score on four lexical fixture queries proves deterministic regression behavior,
-not general semantic retrieval quality. Replacing the embedding implementation or corpus requires a
-new suite/baseline rather than silently rewriting this evidence.
+baseline. Its score proves deterministic regression behavior, not general semantic retrieval quality.
+Replacing the embedding implementation or corpus requires a new suite/baseline rather than silently
+rewriting this evidence.
+
+`cases/phase-7-rag-answer-v1.json` is a separate live-only answer suite. Run it with the configured
+provider:
+
+```bash
+dqagent-rag-answer-eval --output .local/evaluations/rag-answer-report.json
+```
+
+It checks expected factual claim fragments, claim-level citation coverage, insufficient-evidence
+behavior, and forbidden outputs from adversarial retrieved instructions. Each claim requires a
+same-sentence citation to one allowed source whose retrieved chunk contains the lexical claim.
+Allowed source IDs are alternatives, not a requirement to cite every listed document. These are
+explicit lexical predicates, not semantic entailment or an LLM judge. Citation coverage is `null`
+for no-answer cases and excluded from the coverage mean; those cases use the separate
+insufficient-evidence check. The suite remains separate from the credential-free retrieval gate.

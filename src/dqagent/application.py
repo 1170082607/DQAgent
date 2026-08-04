@@ -6,8 +6,16 @@ from threading import Lock
 from uuid import uuid4
 
 from dqagent.context import ContextBuilder, ContextWindow
-from dqagent.errors import LLMProviderError, SessionNotFoundError
+from dqagent.errors import (
+    DQAgentError,
+    LLMProviderError,
+    RetrievalError,
+    RunExecutionError,
+    SessionNotFoundError,
+)
+from dqagent.events import RunEventType
 from dqagent.execution import RunContext
+from dqagent.lifecycle import RunCoordinator, RunScope
 from dqagent.llm import LLMClient
 from dqagent.models import ConversationItem, Message, Role
 from dqagent.retrieval import (
@@ -16,7 +24,7 @@ from dqagent.retrieval import (
     Retriever,
     resolve_answer_citations,
 )
-from dqagent.runtime import AgentRunResult, AgentRuntime
+from dqagent.runtime import AgentExecutionResult, AgentRunResult, AgentRuntime
 from dqagent.session import SessionSnapshot, SessionStore
 
 
@@ -110,6 +118,13 @@ class SessionRunResult:
         return resolve_answer_citations(self.output.content, self.retrieval)
 
 
+@dataclass(frozen=True, slots=True)
+class _SessionExecution:
+    agent: AgentExecutionResult
+    context_window: ContextWindow
+    retrieval: RetrievalResult | None
+
+
 class SessionAgentApplication:
     """Coordinates durable transcripts, bounded context views, and agent runs."""
 
@@ -123,6 +138,7 @@ class SessionAgentApplication:
         retriever: Retriever | None = None,
         retrieval_limit: int = 5,
         retrieval_min_score: float = 0.05,
+        run_coordinator: RunCoordinator | None = None,
     ) -> None:
         if not session_id.strip():
             raise ValueError("session ID must not be empty")
@@ -135,6 +151,7 @@ class SessionAgentApplication:
         self._retriever = retriever
         self._retrieval_limit = retrieval_limit
         self._retrieval_min_score = retrieval_min_score
+        self._run_coordinator = run_coordinator or runtime.run_coordinator
         self._lock = Lock()
 
     @classmethod
@@ -148,6 +165,7 @@ class SessionAgentApplication:
         retriever: Retriever | None = None,
         retrieval_limit: int = 5,
         retrieval_min_score: float = 0.05,
+        run_coordinator: RunCoordinator | None = None,
     ) -> "SessionAgentApplication":
         resolved_id = str(uuid4()) if session_id is None else session_id
         store.save(SessionSnapshot(resolved_id), expected_revision=None)
@@ -159,6 +177,7 @@ class SessionAgentApplication:
             retriever=retriever,
             retrieval_limit=retrieval_limit,
             retrieval_min_score=retrieval_min_score,
+            run_coordinator=run_coordinator,
         )
 
     @classmethod
@@ -172,6 +191,7 @@ class SessionAgentApplication:
         retriever: Retriever | None = None,
         retrieval_limit: int = 5,
         retrieval_min_score: float = 0.05,
+        run_coordinator: RunCoordinator | None = None,
     ) -> "SessionAgentApplication":
         if store.load(session_id) is None:
             raise SessionNotFoundError(f"session not found: {session_id!r}")
@@ -183,6 +203,7 @@ class SessionAgentApplication:
             retriever=retriever,
             retrieval_limit=retrieval_limit,
             retrieval_min_score=retrieval_min_score,
+            run_coordinator=run_coordinator,
         )
 
     @property
@@ -228,28 +249,26 @@ class SessionAgentApplication:
             run_context = (
                 context.child(metadata={"session_id": self._session_id})
                 if context is not None
-                else self._runtime.create_context(metadata={"session_id": self._session_id})
-            )
-            retrieval = (
-                self._retriever.retrieve(
-                    user_input,
-                    limit=self._retrieval_limit,
-                    min_score=self._retrieval_min_score,
+                else self._run_coordinator.create_context(
+                    metadata={"session_id": self._session_id}
                 )
-                if self._retriever is not None
-                else None
             )
-            window = self._context_builder.build(
-                snapshot.transcript,
-                user_message,
-                knowledge_keys=knowledge_keys,
-                retrieval=retrieval,
+            coordinated = self._run_coordinator.execute(
+                lambda scope: self._execute_run_stages(
+                    snapshot,
+                    user_message,
+                    knowledge_keys,
+                    scope,
+                ),
                 context=run_context,
+                completion_attributes=lambda result: {
+                    "iterations": result.agent.iterations
+                },
             )
-            agent_result = self._runtime.run(
-                window.items,
-                context=run_context,
-                context_attributes=window.event_attributes(),
+            execution = coordinated.value
+            agent_result = AgentRunResult.from_execution(
+                execution.agent,
+                coordinated.record,
             )
             candidate = replace(
                 snapshot,
@@ -260,4 +279,104 @@ class SessionAgentApplication:
                 ),
             )
             saved = self._store.save(candidate, expected_revision=snapshot.revision)
-            return SessionRunResult(agent_result, saved, window, retrieval)
+            return SessionRunResult(
+                agent_result,
+                saved,
+                execution.context_window,
+                execution.retrieval,
+            )
+
+    def _execute_run_stages(
+        self,
+        snapshot: SessionSnapshot,
+        user_message: Message,
+        knowledge_keys: Sequence[str],
+        scope: RunScope,
+    ) -> _SessionExecution:
+        retrieval: RetrievalResult | None = None
+        try:
+            scope.context.check_active()
+            if self._retriever is not None:
+                retrieval = _retrieve(
+                    self._retriever,
+                    user_message.content,
+                    limit=self._retrieval_limit,
+                    min_score=self._retrieval_min_score,
+                    scope=scope,
+                )
+            window = self._context_builder.build(
+                snapshot.transcript,
+                user_message,
+                knowledge_keys=knowledge_keys,
+                retrieval=retrieval,
+                context=scope.context,
+            )
+            scope.emit(RunEventType.CONTEXT_ASSEMBLED, window.event_attributes())
+        except DQAgentError:
+            raise
+        except Exception as exc:
+            error = RunExecutionError(
+                "unexpected pre-model application failure",
+                run_id=scope.context.run_id,
+            )
+            raise error from exc
+
+        agent = self._runtime.execute(window.items, scope=scope)
+        return _SessionExecution(agent, window, retrieval)
+
+
+def _retrieve(
+    retriever: Retriever,
+    query: str,
+    *,
+    limit: int,
+    min_score: float,
+    scope: RunScope,
+) -> RetrievalResult:
+    context = scope.context
+    request_attributes = {
+        "query": query,
+        "limit": limit,
+        "min_score": min_score,
+    }
+    scope.emit(RunEventType.RETRIEVAL_STARTED, request_attributes)
+    try:
+        retrieval = retriever.retrieve(
+            query,
+            limit=limit,
+            min_score=min_score,
+            context=context,
+        )
+        context.check_active()
+    except DQAgentError as exc:
+        scope.emit_error(
+            RunEventType.RETRIEVAL_FAILED,
+            exc,
+            request_attributes,
+        )
+        raise
+    except Exception as exc:
+        error = RetrievalError("retrieval failed", run_id=context.run_id)
+        scope.emit_error(
+            RunEventType.RETRIEVAL_FAILED,
+            error,
+            request_attributes,
+            cause_type=type(exc).__name__,
+        )
+        raise error from exc
+    scope.emit(
+        RunEventType.RETRIEVAL_COMPLETED,
+        _retrieval_event_attributes(retrieval),
+    )
+    return retrieval
+
+
+def _retrieval_event_attributes(retrieval: RetrievalResult) -> dict[str, object]:
+    return {
+        "query": retrieval.query,
+        "retrieved_chunk_count": len(retrieval.chunks),
+        "retrieved_chunk_ids": [item.chunk.chunk_id for item in retrieval.chunks],
+        "retrieval_scores": [item.score for item in retrieval.chunks],
+        "retriever_identity": retrieval.retriever_identity,
+        "candidate_count": retrieval.candidate_count,
+    }

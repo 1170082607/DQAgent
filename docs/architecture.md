@@ -8,20 +8,17 @@ isolation, and other future capabilities remain in the [roadmap](roadmap.md).
 ## System Context
 
 DQAgent is a local command-line agent. It can maintain in-memory conversation state or persist a
-session transcript, project that transcript into a bounded active context, and delegate each user
-turn to an observable runtime that calls a configured model, executes application-owned tools, and
-continues until it reaches a terminal state.
+session transcript, project that transcript into a bounded active context, and coordinate each user
+turn across retrieval, context construction, and an observable runtime. The runtime calls a configured
+model, executes application-owned tools, and continues until it produces a result or fails.
 
 ```text
-User -> CLI -> AgentApplication -> AgentRuntime -> LLMClient -> provider adapter
-                                                            -> OpenAI Responses API
-                                                            -> llama-server Chat Completions API
+User -> CLI -> AgentApplication -> RunCoordinator -> AgentRuntime -> LLMClient
+                                      |                |
+                                      |                +-> ToolRegistry -> tool handler
                                       |
-                                      +---------> ToolRegistry -> tool handler
-                                      |
-RunContext ---------------------------+
-                                      |
-                                      +---------> EventSink adapters
+                                      +-> RunContext + RunScope
+                                      +-> EventSink adapters
 
 Versioned case -> EvaluationRunner -> AgentRuntime -> EvaluationReport
                        |                   |
@@ -33,13 +30,11 @@ Workflow input -> WorkflowRunner -> validated node graph -> WorkflowRunResult
                         +-> CheckpointStore +-> sequential / conditional / parallel nodes
                         +-> RunContext + shared lifecycle events
 
-Session ID -> SessionAgentApplication -> SessionStore (full transcript + CAS revision)
+Session ID -> SessionAgentApplication -> RunCoordinator -> Retriever
+                       |                        +-> ContextBuilder
+                       |                        +-> AgentRuntime
                        |
-                       +-> ContextBuilder -> prompt sections + requested project knowledge
-                       |        |
-                       |        +-> whole-turn selection -> structural/model summary
-                       |
-                       +-> AgentRuntime -> new run items -> session commit
+                       +-> SessionStore (full transcript + CAS revision after run success)
 
 Context case -> ContextEvaluationRunner -> production ContextBuilder -> context report
 ```
@@ -65,17 +60,22 @@ step genuinely needs model decisions, but workflow transitions remain determinis
 `AgentApplication` owns a conversation. It adds a user message to pending history, calls the runtime,
 and commits the returned conversation only when the run completes successfully.
 
-`SessionAgentApplication` owns one durable session transaction. It loads a snapshot, constructs a
-temporary context, calls the same runtime, and appends only the current user message and the runtime's
-new items through compare-and-swap. `SessionStore` owns serialization and revision checks; it does not
-select model context.
+`SessionAgentApplication` owns one durable session transaction and the order of its retrieval,
+context, and model/tool stages. It loads a snapshot, submits those stages to `RunCoordinator`, and
+appends only the current user message and new model/tool items through compare-and-swap after run
+success. `SessionStore` owns serialization and revision checks; it does not select model context.
 
 `PromptAssembler` owns named system sections and explicitly requested project knowledge.
 `ContextBuilder` owns budget estimation, complete-turn selection, compaction, and summary provenance.
 Neither component mutates the durable transcript.
 
-`AgentRuntime` owns one execution. It controls model/tool iteration, repeated-call protection,
-provider retry, lifecycle transitions, and event emission. It does not persist conversation state.
+`RunCoordinator` owns one end-to-end run across application and runtime stages. It controls the
+single start and terminal transitions, error-to-run binding, ordered event stream, and default timeout.
+It invokes application orchestration through a callback and exposes only a non-terminal `RunScope`.
+
+`AgentRuntime` owns the bounded model/tool stage. It controls model/tool iteration, repeated-call
+protection, provider retry, and model/tool stage events. It does not retrieve knowledge, construct
+active context, persist conversation state, or own the surrounding run lifecycle.
 
 `RunContext` carries data and control signals shared by all work in one run: run ID, start time,
 deadline, cancellation, and read-only metadata.
@@ -99,22 +99,32 @@ persistence but does not execute nodes or infer retry safety.
 `ContextEvaluationRunner` measures the production context projection directly. It does not generate
 answers or implement an alternate context algorithm.
 
-This split is similar to separating a stateful application service from a request-scoped middleware
-and execution engine. The analogy is incomplete because the model can request more work, so the
-runtime owns a bounded state machine rather than a single RPC call.
+This split is similar to an application service invoking work inside a transaction coordinator while
+delegating one stage to an execution engine. The analogy is incomplete because the lifecycle provides
+ordered observations rather than database atomicity, and the model/tool stage is a bounded state
+machine rather than a single RPC call.
 
 ## Run Lifecycle
 
-`AgentApplication.run` creates pending history and delegates it to `AgentRuntime.run`. The runtime
-uses this state machine:
+`AgentApplication.run` creates pending history and calls the convenience `AgentRuntime.run`; that
+method delegates lifecycle management to its default `RunCoordinator`. `SessionAgentApplication`
+instead calls `RunCoordinator.execute` with an operation that performs retrieval, context construction,
+and `AgentRuntime.execute`. This keeps the application responsible for stage order without giving it
+start, complete, or fail operations.
+
+The coordinator creates a `RunScope` containing the shared `RunContext` and non-terminal event
+methods. Application and runtime stages may emit their own observations, but the scope rejects run
+lifecycle event types. The coordinator alone maps normal return or escaped failure to exactly one
+terminal transition:
 
 ```text
-RUNNING -> model request -> final text --------------------> COMPLETED
-             | failure          |
-             |                  +-> tool calls -> execute -> next model request
-             |
-             +-> retryable and attempts remain -> backoff -> retry
-             +-> non-retryable / attempts exhausted ------> FAILED
+RUNNING -> retrieval -> context -> model request -> final text -> COMPLETED
+             |           |           |
+             |           |           +-> tool calls -> execute -> next model request
+             |           |
+             +-----------+---------------> stage failure ----------------> FAILED
+                                     |
+                                     +-> retryable -> backoff -> retry
 
 RUNNING -> cancellation ----------------------------------> CANCELLED
 RUNNING -> deadline exhausted -----------------------------> TIMED_OUT
@@ -124,6 +134,11 @@ RUNNING -> iteration limit / unexpected failure ----------> FAILED
 Terminal failure, cancellation, and timeout do not commit pending conversation items. External tool
 side effects are not rolled back; mutating handlers still need their own transaction and idempotency
 guarantees.
+
+`RUN_COMPLETED` means the coordinated computation, including request-scoped retrieval and context assembly,
+completed. The session compare-and-swap is a surrounding application transaction performed after
+that terminal event. A later session conflict therefore does not rewrite the completed agent event;
+callers must observe the session error separately.
 
 ## Execution Context
 
@@ -160,7 +175,8 @@ UTC timestamp, elapsed seconds, and structured attributes. Current event types c
 - Model request start, completion, and failure for each attempt.
 - Scheduled retry and backoff duration.
 - Tool-call processing start and completion.
-- Retrieval completion with query, result count, chunk IDs, and scores.
+- Retrieval start, completion, and failure with query, result count, chunk IDs, scores, and error
+  classification.
 - Context assembly with budget, turn selection, knowledge keys, and summary provenance.
 - Workflow node, transition, checkpoint, interruption, and resume activity.
 
@@ -347,10 +363,14 @@ view for that document. Updating a shorter document therefore removes stale old 
 an explicit lifecycle operation.
 
 `EmbeddingProvider` and `VectorStore` are neutral protocols backed by concrete local implementations.
-`HashingEmbeddingProvider` maps case-folded tokens through deterministic feature hashing and L2
-normalization. It needs lexical overlap and can have hash collisions; it is a CI-capable architecture
-baseline, not a semantic embedding model. Each `IndexedChunk` stores its embedding provider identity.
-The retriever rejects an incompatible index rather than comparing vectors from different spaces.
+`EmbeddingProvider` exposes separate document and query embedding methods so a provider can apply
+different task modes or prefixes. `HashingEmbeddingProvider` maps case-folded tokens through
+deterministic feature hashing and L2 normalization. It needs lexical overlap and can have hash
+collisions; it is a CI-capable architecture baseline, not a semantic embedding model. Each
+`IndexedChunk` stores its embedding provider identity. The application-level `RetrievalResult`
+reports an optional neutral retriever identity and optional candidate count instead of requiring a
+local index size. The local vector retriever includes its embedding identity in the retriever
+identity; vector-specific compatibility checks remain inside that implementation.
 
 The in-memory store is thread-safe and test-oriented. `JsonFileVectorStore` holds a versioned complete
 index and uses atomic replacement under a process-local lock. Each update rewrites and each query loads
@@ -363,7 +383,7 @@ and returns rank-local citation IDs with full chunk provenance. An empty index o
 threshold returns an explicit empty result instead of an error.
 
 When configured, `SessionAgentApplication` retrieves from the current user input before context
-construction:
+construction and passes the same `RunContext` to the retriever:
 
 ```text
 durable transcript + user query -> retrieve -> untrusted citation-labelled prompt passages
@@ -371,25 +391,35 @@ durable transcript + user query -> retrieve -> untrusted citation-labelled promp
                                -> commit only user/agent conversation items
 ```
 
-The retrieval policy tells the model that passages are untrusted data and factual claims should use
-bracket citations such as `[R1]`. Delimiting data reduces accidental instruction following but is not
-a hard prompt-injection sandbox. Retrieved passages, scores, and policies remain transient and do not
-enter the session transcript. `SessionRunResult` retains the complete retrieval result and resolves
-answer IDs into cited sources, retrieved-but-uncited IDs, and unknown IDs. Resolution is evidence for
-callers and evaluation; it does not fail a completed model answer. `RETRIEVAL_COMPLETED` and
-`CONTEXT_ASSEMBLED` expose query, count, chunk IDs, and scores on the run event stream. Retrieval
-failures occur before the model request and transcript commit.
+The trusted retrieval policy remains a system message. Each passage is a clearly delimited `USER`
+message marked as untrusted data, so retrieved instructions do not receive system-message authority.
+Delimiting data reduces accidental instruction following but is not a hard prompt-injection sandbox.
+Retrieved passages, scores, and policies remain transient and do not enter the session transcript.
+`SessionRunResult` retains the complete retrieval result and resolves answer IDs into cited sources,
+retrieved-but-uncited IDs, and unknown IDs. Resolution is evidence for callers and evaluation; it does
+not fail a completed model answer. Retrieval start/completion/failure and context assembly share the
+same ordered run event stream. Retrieval failures emit a terminal event before the model request and
+session commit.
 
 The retrieval evaluation runner indexes fixture documents through the production pipeline and
-measures `Recall@k` and reciprocal rank before generation. This isolates ranking regressions from
-model citation faithfulness. The Phase 7 fixture baseline is intentionally lexical and small.
+measures `Recall@k`, reciprocal rank, and explicit no-result behavior before generation. Every case
+uses the suite's configured score threshold. Recall and reciprocal rank are not applicable to
+no-result cases and are excluded from ranking means. The fixture corpus includes multi-chunk
+documents, lexical distractors, paraphrased and multi-relevant queries, and adversarial content.
+
+A separate live-only answer evaluator runs the same session application path. Its deterministic
+judge checks explicit answer fragments, forbidden injection outputs, insufficient-evidence behavior,
+and claim-level citation coverage. A claim passes only when its sentence cites a retrieved chunk from
+one allowed source and that chunk contains the same lexical claim. This tests citation locality and
+source linkage, not semantic entailment.
 
 ## Dependency Rules
 
 ```text
-CLI -> AgentApplication -> AgentRuntime
-CLI -> SessionAgentApplication -> ContextBuilder + SessionStore + AgentRuntime
-AgentRuntime -> RunContext + LLMClient + ToolRegistry + neutral models
+CLI -> AgentApplication -> RunCoordinator + AgentRuntime
+CLI -> SessionAgentApplication -> RunCoordinator + ContextBuilder + SessionStore + AgentRuntime
+RunCoordinator -> RunContext + RunEventEmitter + EventSink
+AgentRuntime -> RunScope + LLMClient + ToolRegistry + neutral models
 ToolRegistry -> RunContext + neutral models + jsonschema
 OpenAI adapter -> RunContext + neutral models + OpenAI SDK
 llama.cpp adapter -> RunContext + neutral models + OpenAI SDK transport
@@ -403,7 +433,7 @@ ContextBuilder + SessionSnapshot -> transcript validator + neutral models
 ContextEvaluationRunner -> ContextBuilder + neutral models
 DocumentIngestor -> DocumentChunker + EmbeddingProvider + VectorStore
 VectorRetriever -> EmbeddingProvider + VectorStore
-SessionAgentApplication -> Retriever + ContextBuilder + SessionStore + AgentRuntime
+SessionAgentApplication -> RunCoordinator + Retriever + ContextBuilder + SessionStore + AgentRuntime
 RetrievalEvaluationRunner -> DocumentIngestor + VectorRetriever
 ```
 
@@ -411,7 +441,8 @@ RetrievalEvaluationRunner -> DocumentIngestor + VectorRetriever
 - Session storage records what happened; context construction decides what the model sees now.
 - Runtime and tool modules must not import provider SDKs.
 - Provider adapters translate wire data and classify infrastructure failures.
-- Event sinks observe execution but cannot mutate runtime state.
+- Event sinks observe execution but cannot mutate run state; stage-facing `RunScope` cannot emit
+  lifecycle transitions.
 - Evaluation observes production-owned results and events; it cannot implement alternate execution.
 - Workflow nodes depend on shared execution contracts, not provider SDKs or CLI state.
 - Checkpoint stores persist scheduler state but do not own workflow transitions or external effects.
@@ -467,8 +498,8 @@ nondeterminism make it an unsuitable correctness gate.
   are lossy, and model summarization adds a provider call before the main agent run.
 - There is no approval policy or cross-session long-term memory.
 - The retrieval store is small, synchronous, single-process, and brute-force. Hashing embeddings are
-  lexical, exact digest deduplication misses near-duplicates, and citation use is not yet validated on
-  generated answers.
+  lexical, exact digest deduplication misses near-duplicates, and answer checks use explicit lexical
+  claims rather than a semantic or LLM-based judge.
 - JSON file checkpoints retain only the latest revision and coordinate one process. There is no
   distributed lease, checkpoint history, migration framework, or multi-worker recovery.
 - Workflows reject cycles, nested parallel subgraphs, dynamic graph mutation, and conflicting branch

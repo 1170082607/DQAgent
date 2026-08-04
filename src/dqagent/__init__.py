@@ -31,6 +31,7 @@ from dqagent.context import (
 )
 from dqagent.events import RunEvent, RunEventType, RunState
 from dqagent.execution import RunContext
+from dqagent.lifecycle import CoordinatedRun, RunCoordinator, RunRecord, RunScope
 from dqagent.models import Message, Role, TokenUsage
 from dqagent.retrieval import (
     CharacterTextChunker,
@@ -53,6 +54,7 @@ from dqagent.retrieval import (
     resolve_answer_citations,
 )
 from dqagent.runtime import (
+    AgentExecutionResult,
     AgentRunResult,
     AgentRuntime,
     RetryPolicy,
@@ -77,6 +79,7 @@ from dqagent.workflow import (
 
 __all__ = [
     "AgentApplication",
+    "AgentExecutionResult",
     "AgentRunResult",
     "AgentRuntime",
     "ChatApplication",
@@ -87,6 +90,7 @@ __all__ = [
     "ContextBudget",
     "ContextBuilder",
     "ContextWindow",
+    "CoordinatedRun",
     "DocumentIngestor",
     "DocumentChunker",
     "EmbeddingProvider",
@@ -117,8 +121,11 @@ __all__ = [
     "RetryPolicy",
     "Role",
     "RunContext",
+    "RunCoordinator",
     "RunEvent",
     "RunEventType",
+    "RunRecord",
+    "RunScope",
     "RunState",
     "SessionAgentApplication",
     "SessionRunResult",

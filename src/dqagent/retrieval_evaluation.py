@@ -31,6 +31,7 @@ class RetrievalEvaluationCase:
     top_k: int
     min_recall: float
     min_reciprocal_rank: float
+    expect_no_results: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +43,7 @@ class RetrievalEvaluationSuite:
     chunk_characters: int
     chunk_overlap: int
     embedding_dimensions: int
+    min_score: float = 0.05
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,8 +51,10 @@ class RetrievalEvaluationResult:
     case_id: str
     passed: bool
     retrieved_document_ids: tuple[str, ...]
-    recall_at_k: float
-    reciprocal_rank: float
+    recall_at_k: float | None
+    reciprocal_rank: float | None
+    no_results: bool
+    expected_no_results: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +69,29 @@ class RetrievalEvaluationReport:
         return bool(self.results) and all(result.passed for result in self.results)
 
     def to_dict(self) -> dict[str, object]:
+        ranking_results = [
+            result for result in self.results if result.recall_at_k is not None
+        ]
+        mean_recall = (
+            sum(
+                result.recall_at_k
+                for result in ranking_results
+                if result.recall_at_k is not None
+            )
+            / len(ranking_results)
+            if ranking_results
+            else None
+        )
+        mean_reciprocal_rank = (
+            sum(
+                result.reciprocal_rank
+                for result in ranking_results
+                if result.reciprocal_rank is not None
+            )
+            / len(ranking_results)
+            if ranking_results
+            else None
+        )
         return {
             "report_schema_version": RETRIEVAL_REPORT_SCHEMA_VERSION,
             "suite_id": self.suite_id,
@@ -75,21 +102,23 @@ class RetrievalEvaluationReport:
                 "passed_cases": sum(result.passed for result in self.results),
                 "failed_cases": sum(not result.passed for result in self.results),
                 "executed_cases": len(self.results),
-                "mean_recall_at_k": sum(result.recall_at_k for result in self.results)
-                / len(self.results),
-                "mean_reciprocal_rank": sum(
-                    result.reciprocal_rank for result in self.results
-                )
-                / len(self.results),
+                "mean_recall_at_k": mean_recall,
+                "mean_reciprocal_rank": mean_reciprocal_rank,
+                "expected_no_result_cases": sum(
+                    result.expected_no_results for result in self.results
+                ),
+                "empty_result_cases": sum(result.no_results for result in self.results),
             },
             "results": [
                 {
                     "case_id": result.case_id,
                     "passed": result.passed,
+                    "expected_no_results": result.expected_no_results,
                     "retrieved_document_ids": list(result.retrieved_document_ids),
                     "metrics": {
                         "recall_at_k": result.recall_at_k,
                         "reciprocal_rank": result.reciprocal_rank,
+                        "no_results": result.no_results,
                     },
                 }
                 for result in self.results
@@ -118,32 +147,54 @@ class RetrievalEvaluationRunner:
             suite.suite_id,
             suite.schema_version,
             datetime.now(UTC),
-            tuple(self._run_case(case, retriever) for case in suite.cases),
+            tuple(self._run_case(case, retriever, suite.min_score) for case in suite.cases),
         )
 
     @staticmethod
     def _run_case(
         case: RetrievalEvaluationCase,
         retriever: VectorRetriever,
+        min_score: float,
     ) -> RetrievalEvaluationResult:
-        result = retriever.retrieve(case.query, limit=case.top_k)
+        result = retriever.retrieve(
+            case.query,
+            limit=case.top_k,
+            min_score=min_score,
+        )
         retrieved = tuple(item.chunk.document_id for item in result.chunks)
         relevant = set(case.relevant_document_ids)
-        recall = len(relevant.intersection(retrieved)) / len(relevant)
-        reciprocal_rank = next(
-            (
-                1.0 / rank
-                for rank, document_id in enumerate(retrieved, start=1)
-                if document_id in relevant
-            ),
-            0.0,
+        no_results = not result.chunks
+        recall = (
+            len(relevant.intersection(retrieved)) / len(relevant) if relevant else None
+        )
+        reciprocal_rank = (
+            next(
+                (
+                    1.0 / rank
+                    for rank, document_id in enumerate(retrieved, start=1)
+                    if document_id in relevant
+                ),
+                0.0,
+            )
+            if relevant
+            else None
+        )
+        passed = (
+            no_results
+            if case.expect_no_results
+            else recall is not None
+            and reciprocal_rank is not None
+            and recall >= case.min_recall
+            and reciprocal_rank >= case.min_reciprocal_rank
         )
         return RetrievalEvaluationResult(
             case.case_id,
-            recall >= case.min_recall and reciprocal_rank >= case.min_reciprocal_rank,
+            passed,
             retrieved,
             recall,
             reciprocal_rank,
+            no_results,
+            case.expect_no_results,
         )
 
 
@@ -179,6 +230,7 @@ def load_retrieval_evaluation_suite(path: Path) -> RetrievalEvaluationSuite:
             cast(int, item["top_k"]),
             float(item["min_recall"]),
             float(item["min_reciprocal_rank"]),
+            bool(item.get("expect_no_results", False)),
         )
         for item in cast(list[dict[str, Any]], data["cases"])
     )
@@ -191,7 +243,17 @@ def load_retrieval_evaluation_suite(path: Path) -> RetrievalEvaluationSuite:
     known = set(document_ids)
     if any(not set(case.relevant_document_ids).issubset(known) for case in cases):
         raise RetrievalError("retrieval evaluation case references an unknown document")
-    config = cast(dict[str, int], data["config"])
+    if any(
+        case.expect_no_results and case.relevant_document_ids
+        for case in cases
+    ):
+        raise RetrievalError("no-result retrieval evaluation cases must have no relevant documents")
+    if any(
+        not case.expect_no_results and not case.relevant_document_ids
+        for case in cases
+    ):
+        raise RetrievalError("empty relevant document IDs require expect_no_results")
+    config = cast(dict[str, Any], data["config"])
     return RetrievalEvaluationSuite(
         cast(str, data["suite_id"]),
         cast(int, data["schema_version"]),
@@ -200,6 +262,7 @@ def load_retrieval_evaluation_suite(path: Path) -> RetrievalEvaluationSuite:
         config["chunk_characters"],
         config["chunk_overlap"],
         config["embedding_dimensions"],
+        float(config["min_score"]),
     )
 
 
@@ -214,11 +277,17 @@ _RETRIEVAL_EVALUATION_SCHEMA: dict[str, object] = {
         "config": {
             "type": "object",
             "additionalProperties": False,
-            "required": ["chunk_characters", "chunk_overlap", "embedding_dimensions"],
+            "required": [
+                "chunk_characters",
+                "chunk_overlap",
+                "embedding_dimensions",
+                "min_score",
+            ],
             "properties": {
                 "chunk_characters": {"type": "integer", "minimum": 1},
                 "chunk_overlap": {"type": "integer", "minimum": 0},
                 "embedding_dimensions": {"type": "integer", "minimum": 8},
+                "min_score": {"type": "number"},
             },
         },
         "documents": {
@@ -258,7 +327,7 @@ _RETRIEVAL_EVALUATION_SCHEMA: dict[str, object] = {
                     "query": {"type": "string", "minLength": 1},
                     "relevant_document_ids": {
                         "type": "array",
-                        "minItems": 1,
+                        "minItems": 0,
                         "uniqueItems": True,
                         "items": {"type": "string", "minLength": 1},
                     },
@@ -269,6 +338,7 @@ _RETRIEVAL_EVALUATION_SCHEMA: dict[str, object] = {
                         "minimum": 0,
                         "maximum": 1,
                     },
+                    "expect_no_results": {"type": "boolean"},
                 },
             },
         },

@@ -17,6 +17,7 @@ from typing import Any, Protocol, cast
 from uuid import uuid4
 
 from dqagent.errors import RetrievalError
+from dqagent.execution import RunContext
 
 INDEX_SCHEMA_VERSION = 1
 _TOKEN_PATTERN = re.compile(r"[\w]+", re.UNICODE)
@@ -133,7 +134,9 @@ class EmbeddingProvider(Protocol):
     @property
     def identity(self) -> str: ...
 
-    def embed(self, texts: Sequence[str]) -> tuple[tuple[float, ...], ...]: ...
+    def embed_documents(self, texts: Sequence[str]) -> tuple[tuple[float, ...], ...]: ...
+
+    def embed_query(self, text: str) -> tuple[float, ...]: ...
 
 
 class HashingEmbeddingProvider:
@@ -148,8 +151,11 @@ class HashingEmbeddingProvider:
     def identity(self) -> str:
         return f"hashing-token-v1:{self._dimensions}"
 
-    def embed(self, texts: Sequence[str]) -> tuple[tuple[float, ...], ...]:
+    def embed_documents(self, texts: Sequence[str]) -> tuple[tuple[float, ...], ...]:
         return tuple(self._embed_one(text) for text in texts)
+
+    def embed_query(self, text: str) -> tuple[float, ...]:
+        return self._embed_one(text)
 
     def _embed_one(self, text: str) -> tuple[float, ...]:
         values = [0.0] * self._dimensions
@@ -325,7 +331,7 @@ class DocumentIngestor:
                 continue
             seen.add(chunk.content_digest)
             unique.append(chunk)
-        vectors = self._embeddings.embed([chunk.content for chunk in unique])
+        vectors = self._embeddings.embed_documents([chunk.content for chunk in unique])
         if len(vectors) != len(unique):
             raise RetrievalError("embedding provider returned the wrong vector count")
         now = datetime.now(UTC)
@@ -356,8 +362,8 @@ class RetrievedChunk:
 class RetrievalResult:
     query: str
     chunks: tuple[RetrievedChunk, ...]
-    embedding_provider: str
-    indexed_chunk_count: int
+    retriever_identity: str | None = None
+    candidate_count: int | None = None
 
     @property
     def citations(self) -> Mapping[str, TextChunk]:
@@ -398,6 +404,7 @@ class Retriever(Protocol):
         *,
         limit: int = 5,
         min_score: float = 0.05,
+        context: RunContext | None = None,
     ) -> RetrievalResult: ...
 
 
@@ -406,13 +413,20 @@ class VectorRetriever:
         self._embeddings = embeddings
         self._store = store
 
+    @property
+    def identity(self) -> str:
+        return f"vector-retriever-v1:{self._embeddings.identity}"
+
     def retrieve(
         self,
         query: str,
         *,
         limit: int = 5,
         min_score: float = 0.05,
+        context: RunContext | None = None,
     ) -> RetrievalResult:
+        if context is not None:
+            context.check_active()
         if not query.strip():
             raise ValueError("retrieval query must not be empty")
         if limit < 1:
@@ -420,8 +434,10 @@ class VectorRetriever:
         if not math.isfinite(min_score):
             raise ValueError("minimum retrieval score must be finite")
         indexed = self._store.all_chunks()
+        if context is not None:
+            context.check_active()
         if not indexed:
-            return RetrievalResult(query, (), self._embeddings.identity, 0)
+            return RetrievalResult(query, (), self.identity, 0)
         incompatible = [
             item
             for item in indexed
@@ -429,10 +445,11 @@ class VectorRetriever:
         ]
         if incompatible:
             raise RetrievalError("index embedding identity does not match the configured provider")
-        query_vectors = self._embeddings.embed((query,))
-        if len(query_vectors) != 1:
-            raise RetrievalError("embedding provider returned the wrong query vector count")
-        query_vector = query_vectors[0]
+        query_vector = self._embeddings.embed_query(query)
+        if not query_vector or not all(math.isfinite(value) for value in query_vector):
+            raise RetrievalError("query embedding must contain finite values")
+        if context is not None:
+            context.check_active()
         scored = sorted(
             (
                 (_dot(query_vector, item.embedding), item.chunk)
@@ -453,7 +470,7 @@ class VectorRetriever:
             RetrievedChunk(f"R{rank}", chunk, score)
             for rank, (score, chunk) in enumerate(unique, start=1)
         )
-        return RetrievalResult(query, selected, self._embeddings.identity, len(indexed))
+        return RetrievalResult(query, selected, self.identity, len(indexed))
 
 
 def _validate_replacement(document_id: str, chunks: Sequence[IndexedChunk]) -> None:

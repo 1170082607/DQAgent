@@ -1,3 +1,4 @@
+import time
 from collections.abc import Mapping, Sequence
 
 import pytest
@@ -50,6 +51,19 @@ class ScriptedLLM:
         if isinstance(outcome, Exception):
             raise outcome
         return outcome
+
+
+class SlowIgnoringContextLLM:
+    def complete(
+        self,
+        messages: Sequence[ConversationItem],
+        tools: Sequence[ToolDefinition] = (),
+        *,
+        context: RunContext | None = None,
+    ) -> Completion:
+        del messages, tools, context
+        time.sleep(0.03)
+        return Completion("too late")
 
 
 class CollectingSink:
@@ -208,6 +222,24 @@ def test_runtime_deadline_interrupts_retry_backoff() -> None:
 
     assert sink.events[-1].type is RunEventType.RUN_TIMED_OUT
     assert RunEventType.RETRY_SCHEDULED in [event.type for event in sink.events]
+
+
+def test_runtime_rejects_completion_returned_after_run_deadline() -> None:
+    sink = CollectingSink()
+    runtime = AgentRuntime(SlowIgnoringContextLLM(), ToolRegistry(), event_sinks=(sink,))
+
+    with pytest.raises(RunDeadlineExceededError):
+        runtime.run(
+            [Message(Role.USER, "Hi")],
+            context=RunContext(run_id="late-model", timeout_seconds=0.01),
+        )
+
+    assert [event.type for event in sink.events] == [
+        RunEventType.RUN_STARTED,
+        RunEventType.MODEL_REQUEST_STARTED,
+        RunEventType.MODEL_REQUEST_FAILED,
+        RunEventType.RUN_TIMED_OUT,
+    ]
 
 
 def test_runtime_keeps_tool_diagnostics_out_of_model_observation() -> None:

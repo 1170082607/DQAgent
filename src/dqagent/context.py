@@ -323,6 +323,12 @@ class ContextWindow:
                     if self.retrieval
                     else []
                 ),
+                "retriever_identity": (
+                    self.retrieval.retriever_identity if self.retrieval else None
+                ),
+                "retrieval_candidate_count": (
+                    self.retrieval.candidate_count if self.retrieval else None
+                ),
                 "summary_method": summary.method.value if summary else None,
                 "summary_source_digest": summary.source_digest if summary else None,
                 "summary_source_item_count": summary.source_item_count if summary else 0,
@@ -536,11 +542,12 @@ def _retrieval_messages(retrieval: RetrievalResult | None) -> tuple[Message, ...
     )
     passages = tuple(
         Message(
-            Role.SYSTEM,
-            f"[{item.citation_id} source={json.dumps(item.chunk.source, ensure_ascii=True)} "
+            Role.USER,
+            f"[retrieved-data untrusted_data=true citation_id={item.citation_id} "
+            f"source={json.dumps(item.chunk.source, ensure_ascii=True)} "
             f"document_id={json.dumps(item.chunk.document_id, ensure_ascii=True)} "
             f"chunk_id={json.dumps(item.chunk.chunk_id, ensure_ascii=True)}]\n"
-            f"{item.chunk.content}",
+            f"{item.chunk.content}\n[/retrieved-data]",
         )
         for item in retrieval.chunks
     )

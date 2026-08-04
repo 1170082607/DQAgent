@@ -24,27 +24,42 @@ explicit. `TextChunk` retains document ID, stable chunk ID, source, source offse
 content SHA-256 digest.
 
 `EmbeddingProvider` and `VectorStore` are provider-neutral protocols with concrete local
-implementations. `HashingEmbeddingProvider` is a deterministic token feature-hashing baseline, not
-a semantic embedding model. Every indexed chunk stores the provider identity, and retrieval rejects
-an index created by a different identity instead of comparing incompatible vectors. The JSON store
-uses a versioned schema and atomic file replacement; the in-memory store supports deterministic tests.
+implementations. `EmbeddingProvider` separates `embed_documents` from `embed_query` because real
+models may use different task modes or prefixes. `HashingEmbeddingProvider` is a deterministic token
+feature-hashing baseline, not a semantic embedding model. Every indexed chunk stores the provider
+identity, and vector retrieval rejects an index created by a different identity instead of comparing
+incompatible vectors. The JSON store uses a versioned schema and atomic file replacement; the
+in-memory store supports deterministic tests.
 
 `VectorRetriever` applies cosine-equivalent dot-product ranking over normalized vectors, a minimum
 score, deterministic tie-breaking, and exact-content deduplication across documents. It returns
-rank-local citation IDs (`R1`, `R2`, ...), scores, and full chunk provenance. Empty retrieval is a
-successful result.
+rank-local citation IDs (`R1`, `R2`, ...), scores, and full chunk provenance. `RetrievalResult` uses
+an optional neutral retriever identity and optional candidate count rather than requiring an
+embedding provider or local index size, so keyword, hybrid, or managed retrievers can return the same
+application shape. The local vector retriever identity includes its embedding identity for useful
+diagnostics. Empty retrieval is a successful result.
 
-Retrieval is enabled only on `SessionAgentApplication`, before bounded context construction. Each
-passage becomes request-scoped system context with an explicit untrusted-data policy. Retrieved text
-and generated context are never persisted in the durable session transcript. `SessionRunResult`
-returns the citation mapping, while `CitationResolution` separates cited, uncited, and unknown answer
-IDs. It observes citation behavior without converting a probabilistic answer-quality defect into a
-runtime failure. `RETRIEVAL_COMPLETED` and `CONTEXT_ASSEMBLED` events expose result counts, IDs, and
-scores. A retrieval failure happens before the model call and session commit.
+Retrieval is enabled only on `SessionAgentApplication`, before bounded context construction. Retrieval
+receives the run context and checks its deadline/cancellation boundary. The trusted retrieval policy
+remains system context; each passage is request-scoped, clearly delimited user data marked as
+untrusted. Retrieved text and generated context are never persisted in the durable session transcript.
+`SessionRunResult` returns the citation mapping, while `CitationResolution` separates cited, uncited,
+and unknown answer IDs. It observes citation behavior without converting a probabilistic answer-quality
+defect into a runtime failure. `RETRIEVAL_STARTED`, `RETRIEVAL_COMPLETED`, and `RETRIEVAL_FAILED`
+events surround the actual retrieval call and share the same run event stream as context assembly and
+model execution. A retrieval failure emits a terminal run event, invokes no model, and does not commit
+the session. As refined by ADR-0008, `RunCoordinator` owns start, error binding, and terminal
+transitions. Retrieval and model/tool stages receive only a `RunScope` capability for non-terminal
+events.
 
-Retrieval evaluation is separate from answer generation. Versioned cases measure `Recall@k` and
-reciprocal rank through the production ingestion and retrieval implementations. A generated answer
-cannot compensate for a missed relevant document.
+Retrieval evaluation is separate from answer generation. Versioned cases measure `Recall@k`, reciprocal
+rank, and explicit no-result behavior through the production ingestion and retrieval implementations
+over multi-chunk, distractor, paraphrased, multi-relevant, adversarial, and no-answer cases. No-result
+cases use the same suite-level threshold as ranking cases and require an empty result. Recall and MRR
+are reported as not applicable for those cases and excluded from ranking means. A generated answer
+cannot compensate for a missed relevant document. The separate live-only answer suite checks claim
+fragments, same-sentence citations to allowed sources containing those lexical claims,
+insufficient-evidence behavior, and forbidden outputs from adversarial retrieved instructions.
 
 ## Consequences
 

@@ -85,8 +85,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             payload = {
                 "query": retrieval.query,
-                "indexed_chunk_count": retrieval.indexed_chunk_count,
-                "embedding_provider": retrieval.embedding_provider,
+                "candidate_count": retrieval.candidate_count,
+                "retriever_identity": retrieval.retriever_identity,
                 "results": [
                     {
                         "citation_id": item.citation_id,

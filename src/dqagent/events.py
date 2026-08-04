@@ -25,7 +25,9 @@ class RunState(StrEnum):
 class RunEventType(StrEnum):
     RUN_STARTED = "run_started"
     RUN_RESUMED = "run_resumed"
+    RETRIEVAL_STARTED = "retrieval_started"
     RETRIEVAL_COMPLETED = "retrieval_completed"
+    RETRIEVAL_FAILED = "retrieval_failed"
     CONTEXT_ASSEMBLED = "context_assembled"
     MODEL_REQUEST_STARTED = "model_request_started"
     MODEL_REQUEST_COMPLETED = "model_request_completed"

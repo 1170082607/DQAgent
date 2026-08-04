@@ -3,7 +3,12 @@ from pathlib import Path
 
 import pytest
 
-from dqagent import cli, retrieval_cli, retrieval_evaluation_cli
+from dqagent import (
+    cli,
+    retrieval_answer_evaluation_cli,
+    retrieval_cli,
+    retrieval_evaluation_cli,
+)
 
 
 def test_index_cli_upserts_queries_and_deletes(
@@ -58,6 +63,52 @@ def test_retrieval_evaluation_cli_writes_report(tmp_path: Path) -> None:
     report = json.loads(output.read_text(encoding="utf-8"))
     assert report["summary"]["passed"] is True
     assert report["summary"]["mean_recall_at_k"] == 1.0
+
+
+def test_answer_evaluation_cli_writes_live_report(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeSettings:
+        run_timeout_seconds = 1.0
+
+    class FakeReport:
+        passed = True
+
+        def to_dict(self) -> dict[str, object]:
+            return {"summary": {"passed": True}}
+
+    class FakeRunner:
+        def __init__(self, llm: object, *, run_timeout_seconds: float) -> None:
+            assert llm == "live-client"
+            assert run_timeout_seconds == 1.0
+
+        def run(self, suite: object) -> FakeReport:
+            assert suite.suite_id == "phase-7-rag-answer-v1"  # type: ignore[attr-defined]
+            return FakeReport()
+
+    monkeypatch.setattr(retrieval_answer_evaluation_cli, "load_dotenv", lambda: None)
+    monkeypatch.setattr(
+        retrieval_answer_evaluation_cli.Settings,
+        "from_env",
+        classmethod(lambda cls: FakeSettings()),
+    )
+    monkeypatch.setattr(
+        retrieval_answer_evaluation_cli,
+        "create_llm_client",
+        lambda settings: "live-client",
+    )
+    monkeypatch.setattr(
+        retrieval_answer_evaluation_cli,
+        "RetrievalAnswerEvaluationRunner",
+        FakeRunner,
+    )
+    output = tmp_path / "answer-report.json"
+
+    exit_code = retrieval_answer_evaluation_cli.main(["--output", str(output)])
+
+    assert exit_code == 0
+    assert json.loads(output.read_text(encoding="utf-8"))["summary"]["passed"] is True
 
 
 def test_main_rejects_retrieval_without_durable_session(

@@ -4,18 +4,17 @@ import json
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 
 from dqagent.errors import (
     AgentLoopError,
     AgentRuntimeError,
     DQAgentError,
     LLMProviderError,
-    RunCancelledError,
-    RunDeadlineExceededError,
 )
-from dqagent.events import EventSink, RunEvent, RunEventEmitter, RunEventType, RunState
+from dqagent.events import EventSink, RunEvent, RunEventType, RunState
 from dqagent.execution import RunContext
+from dqagent.lifecycle import RunCoordinator, RunRecord, RunScope
 from dqagent.llm import LLMClient
 from dqagent.models import (
     Completion,
@@ -31,6 +30,7 @@ from dqagent.tools import ToolRegistry
 
 __all__ = [
     "AgentRunResult",
+    "AgentExecutionResult",
     "AgentRuntime",
     "EventSink",
     "RetryPolicy",
@@ -82,6 +82,16 @@ class RetryPolicy:
 
 
 @dataclass(frozen=True, slots=True)
+class AgentExecutionResult:
+    """Model/tool loop output before end-to-end lifecycle metadata is attached."""
+
+    output: Message
+    conversation: tuple[ConversationItem, ...]
+    new_items: tuple[ConversationItem, ...]
+    iterations: int
+
+
+@dataclass(frozen=True, slots=True)
 class AgentRunResult:
     run_id: str
     state: RunState
@@ -92,9 +102,28 @@ class AgentRunResult:
     started_at: datetime
     completed_at: datetime
 
+    @classmethod
+    def from_execution(
+        cls,
+        execution: AgentExecutionResult,
+        record: RunRecord,
+    ) -> "AgentRunResult":
+        if record.state is not RunState.COMPLETED:
+            raise ValueError("an agent result requires a completed run record")
+        return cls(
+            run_id=record.run_id,
+            state=record.state,
+            output=execution.output,
+            conversation=execution.conversation,
+            new_items=execution.new_items,
+            events=record.events,
+            started_at=record.started_at,
+            completed_at=record.completed_at,
+        )
+
 
 class AgentRuntime:
-    """Owns one run's loop, retry policy, lifecycle, and event stream."""
+    """Executes the bounded model/tool stage of an agent run."""
 
     def __init__(
         self,
@@ -108,66 +137,48 @@ class AgentRuntime:
     ) -> None:
         if max_iterations < 1:
             raise ValueError("max_iterations must be at least one")
-        if default_timeout_seconds is not None and (
-            not math.isfinite(default_timeout_seconds) or default_timeout_seconds <= 0
-        ):
-            raise ValueError("default run timeout must be a finite number greater than zero")
         self._llm = llm
         self._tools = tools
         self._max_iterations = max_iterations
         self._retry_policy = retry_policy or RetryPolicy()
-        self._default_timeout_seconds = default_timeout_seconds
-        self._event_sinks = tuple(event_sinks)
+        self._run_coordinator = RunCoordinator(
+            default_timeout_seconds=default_timeout_seconds,
+            event_sinks=event_sinks,
+        )
 
     def run(
         self,
         conversation: Sequence[ConversationItem],
         *,
         context: RunContext | None = None,
-        context_attributes: Mapping[str, object] | None = None,
     ) -> AgentRunResult:
-        run_context = context or RunContext(timeout_seconds=self._default_timeout_seconds)
-        emitter = RunEventEmitter(run_context, self._event_sinks)
-        pending = list(conversation)
-        initial_item_count = len(pending)
-        seen_call_ids: set[str] = set()
-        seen_executions: set[tuple[str, str]] = set()
-        emitter.emit(
-            RunEventType.RUN_STARTED,
-            RunState.RUNNING,
-            {
-                "deadline": run_context.deadline.isoformat() if run_context.deadline else None,
-                "metadata": dict(run_context.metadata),
-            },
+        coordinated = self._run_coordinator.execute(
+            lambda scope: self.execute(conversation, scope=scope),
+            context=context,
+            completion_attributes=lambda result: {"iterations": result.iterations},
         )
-        if context_attributes is not None:
-            if context_attributes.get("retrieval_query") is not None:
-                emitter.emit(
-                    RunEventType.RETRIEVAL_COMPLETED,
-                    RunState.RUNNING,
-                    {
-                        key: context_attributes[key]
-                        for key in (
-                            "retrieval_query",
-                            "retrieved_chunk_count",
-                            "retrieved_chunk_ids",
-                            "retrieval_scores",
-                        )
-                    },
-                )
-            emitter.emit(
-                RunEventType.CONTEXT_ASSEMBLED,
-                RunState.RUNNING,
-                context_attributes,
-            )
+        return AgentRunResult.from_execution(coordinated.value, coordinated.record)
+
+    def execute(
+        self,
+        conversation: Sequence[ConversationItem],
+        *,
+        scope: RunScope,
+    ) -> AgentExecutionResult:
+        """Execute the model/tool loop inside an externally coordinated run."""
+        run_context = scope.context
 
         try:
+            pending = list(conversation)
+            initial_item_count = len(pending)
+            seen_call_ids: set[str] = set()
+            seen_executions: set[tuple[str, str]] = set()
             run_context.check_active()
             for iteration in range(1, self._max_iterations + 1):
                 completion = self._complete_with_retry(
                     pending,
                     run_context,
-                    emitter,
+                    scope,
                     iteration,
                 )
                 assistant_message = (
@@ -181,28 +192,18 @@ class AgentRuntime:
                 if not completion.tool_calls:
                     if assistant_message is None:
                         raise AgentLoopError("model returned neither text nor tool calls")
-                    emitter.emit(
-                        RunEventType.RUN_COMPLETED,
-                        RunState.COMPLETED,
-                        {"iterations": iteration},
-                    )
-                    return AgentRunResult(
-                        run_id=run_context.run_id,
-                        state=RunState.COMPLETED,
+                    return AgentExecutionResult(
                         output=assistant_message,
                         conversation=tuple(pending),
                         new_items=tuple(pending[initial_item_count:]),
-                        events=emitter.events,
-                        started_at=run_context.started_at,
-                        completed_at=datetime.now(UTC),
+                        iterations=iteration,
                     )
 
                 pending.extend(completion.tool_calls)
                 for call in completion.tool_calls:
                     run_context.check_active()
-                    emitter.emit(
+                    scope.emit(
                         RunEventType.TOOL_CALL_STARTED,
-                        RunState.RUNNING,
                         {"iteration": iteration, "call_id": call.call_id, "tool": call.name},
                     )
                     execution_key = self._execution_key(call)
@@ -218,20 +219,19 @@ class AgentRuntime:
                     else:
                         seen_call_ids.add(call.call_id)
                         seen_executions.add(execution_key)
-                        execution = self._tools.execute_detailed(call, run_context)
-                        result = execution.result
+                        tool_execution = self._tools.execute_detailed(call, run_context)
+                        result = tool_execution.result
                         diagnostic = {
                             key: value
                             for key, value in (
-                                ("error_type", execution.error_type),
-                                ("error_message", execution.error_message),
+                                ("error_type", tool_execution.error_type),
+                                ("error_message", tool_execution.error_message),
                             )
                             if value is not None
                         }
                     pending.append(result)
-                    emitter.emit(
+                    scope.emit(
                         RunEventType.TOOL_CALL_COMPLETED,
-                        RunState.RUNNING,
                         {
                             "iteration": iteration,
                             "call_id": call.call_id,
@@ -245,68 +245,39 @@ class AgentRuntime:
             raise AgentLoopError(
                 f"agent did not produce a final answer within {self._max_iterations} model calls"
             )
-        except RunCancelledError as exc:
-            self._bind_error_to_run(exc, run_context)
-            emitter.emit(
-                RunEventType.RUN_CANCELLED,
-                RunState.CANCELLED,
-                self._error_attributes(exc),
-            )
-            raise
-        except RunDeadlineExceededError as exc:
-            self._bind_error_to_run(exc, run_context)
-            emitter.emit(
-                RunEventType.RUN_TIMED_OUT,
-                RunState.TIMED_OUT,
-                self._error_attributes(exc),
-            )
-            raise
-        except DQAgentError as exc:
-            self._bind_error_to_run(exc, run_context)
-            emitter.emit(
-                RunEventType.RUN_FAILED,
-                RunState.FAILED,
-                self._error_attributes(exc),
-            )
+        except DQAgentError:
             raise
         except Exception as exc:
             error = AgentRuntimeError(
                 "unexpected agent runtime failure",
                 run_id=run_context.run_id,
             )
-            emitter.emit(
-                RunEventType.RUN_FAILED,
-                RunState.FAILED,
-                {
-                    **self._error_attributes(error),
-                    "cause_type": type(exc).__name__,
-                },
-            )
             raise error from exc
+
+    @property
+    def run_coordinator(self) -> RunCoordinator:
+        """Return the default coordinator used by standalone runtime runs."""
+        return self._run_coordinator
 
     def create_context(
         self,
         *,
         metadata: Mapping[str, object] | None = None,
     ) -> RunContext:
-        """Create a context using this runtime's end-to-end timeout policy."""
-        return RunContext(
-            timeout_seconds=self._default_timeout_seconds,
-            metadata=metadata,
-        )
+        """Create a context using the configured coordinator's timeout policy."""
+        return self._run_coordinator.create_context(metadata=metadata)
 
     def _complete_with_retry(
         self,
         pending: Sequence[ConversationItem],
         context: RunContext,
-        emitter: RunEventEmitter,
+        scope: RunScope,
         iteration: int,
     ) -> Completion:
         for attempt in range(1, self._retry_policy.max_attempts + 1):
             context.check_active()
-            emitter.emit(
+            scope.emit(
                 RunEventType.MODEL_REQUEST_STARTED,
-                RunState.RUNNING,
                 {"iteration": iteration, "attempt": attempt},
             )
             try:
@@ -315,37 +286,27 @@ class AgentRuntime:
                     self._tools.definitions,
                     context=context,
                 )
+                context.check_active()
             except LLMProviderError as exc:
-                self._bind_error_to_run(exc, context)
-                emitter.emit(
+                scope.emit_error(
                     RunEventType.MODEL_REQUEST_FAILED,
-                    RunState.RUNNING,
-                    {
-                        "iteration": iteration,
-                        "attempt": attempt,
-                        **self._error_attributes(exc),
-                    },
+                    exc,
+                    {"iteration": iteration, "attempt": attempt},
                 )
                 if not exc.retryable or attempt >= self._retry_policy.max_attempts:
                     raise
                 delay = self._retry_policy.delay_after(attempt)
-                emitter.emit(
+                scope.emit(
                     RunEventType.RETRY_SCHEDULED,
-                    RunState.RUNNING,
                     {"iteration": iteration, "attempt": attempt, "delay_seconds": delay},
                 )
                 context.wait(delay)
                 continue
             except DQAgentError as exc:
-                self._bind_error_to_run(exc, context)
-                emitter.emit(
+                scope.emit_error(
                     RunEventType.MODEL_REQUEST_FAILED,
-                    RunState.RUNNING,
-                    {
-                        "iteration": iteration,
-                        "attempt": attempt,
-                        **self._error_attributes(exc),
-                    },
+                    exc,
+                    {"iteration": iteration, "attempt": attempt},
                 )
                 raise
             except Exception as exc:
@@ -353,20 +314,15 @@ class AgentRuntime:
                     "unexpected model client failure",
                     run_id=context.run_id,
                 )
-                emitter.emit(
+                scope.emit_error(
                     RunEventType.MODEL_REQUEST_FAILED,
-                    RunState.RUNNING,
-                    {
-                        "iteration": iteration,
-                        "attempt": attempt,
-                        **self._error_attributes(error),
-                        "cause_type": type(exc).__name__,
-                    },
+                    error,
+                    {"iteration": iteration, "attempt": attempt},
+                    cause_type=type(exc).__name__,
                 )
                 raise error from exc
-            emitter.emit(
+            scope.emit(
                 RunEventType.MODEL_REQUEST_COMPLETED,
-                RunState.RUNNING,
                 {
                     "iteration": iteration,
                     "attempt": attempt,
@@ -386,19 +342,6 @@ class AgentRuntime:
             )
             return completion
         raise AssertionError("retry loop must return or raise")
-
-    @staticmethod
-    def _error_attributes(error: DQAgentError) -> Mapping[str, object]:
-        return {
-            "error_type": type(error).__name__,
-            "error_category": error.category.value,
-            "retryable": error.retryable,
-            "message": str(error),
-        }
-
-    @staticmethod
-    def _bind_error_to_run(error: DQAgentError, context: RunContext) -> None:
-        error.run_id = context.run_id
 
     @staticmethod
     def _execution_key(call: ToolCall) -> tuple[str, str]:

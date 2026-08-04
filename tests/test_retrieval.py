@@ -86,7 +86,8 @@ def test_retrieval_is_ranked_stable_and_deduplicates_across_documents() -> None:
 
     assert [item.citation_id for item in result.chunks] == ["R1"]
     assert result.chunks[0].chunk.document_id == "a"
-    assert result.indexed_chunk_count == 3
+    assert result.retriever_identity == "vector-retriever-v1:hashing-token-v1:64"
+    assert result.candidate_count == 3
 
 
 def test_json_store_round_trips_and_rejects_corrupt_or_incompatible_index(
@@ -150,3 +151,56 @@ def test_answer_citations_resolve_valid_uncited_and_unknown_ids() -> None:
     assert tuple(resolved.cited) == ("R2",)
     assert resolved.uncited_ids == ("R1",)
     assert resolved.unknown_ids == ("R99",)
+
+
+def test_embedding_provider_separates_document_and_query_purposes() -> None:
+    class RecordingEmbeddingProvider:
+        identity = "recording-v1"
+
+        def __init__(self) -> None:
+            self.documents: tuple[str, ...] = ()
+            self.query: str | None = None
+
+        def embed_documents(self, texts: tuple[str, ...]) -> tuple[tuple[float, ...], ...]:
+            self.documents = tuple(texts)
+            return tuple((1.0, 0.0) for _ in texts)
+
+        def embed_query(self, text: str) -> tuple[float, ...]:
+            self.query = text
+            return (1.0, 0.0)
+
+    embeddings = RecordingEmbeddingProvider()
+    store = InMemoryVectorStore()
+    DocumentIngestor(CharacterTextChunker(), embeddings, store).upsert(
+        SourceDocument("doc", "indexed text", "doc.md")
+    )
+
+    result = VectorRetriever(embeddings, store).retrieve("query text")
+
+    assert embeddings.documents == ("indexed text",)
+    assert embeddings.query == "query text"
+    assert result.chunks[0].chunk.document_id == "doc"
+
+
+@pytest.mark.parametrize("query_vector", [(), (float("nan"), 0.0)])
+def test_retriever_rejects_invalid_query_embedding(
+    query_vector: tuple[float, ...],
+) -> None:
+    class InvalidQueryEmbeddingProvider:
+        identity = "invalid-query-v1"
+
+        def embed_documents(self, texts: tuple[str, ...]) -> tuple[tuple[float, ...], ...]:
+            return tuple((1.0, 0.0) for _ in texts)
+
+        def embed_query(self, text: str) -> tuple[float, ...]:
+            del text
+            return query_vector
+
+    embeddings = InvalidQueryEmbeddingProvider()
+    store = InMemoryVectorStore()
+    DocumentIngestor(CharacterTextChunker(), embeddings, store).upsert(
+        SourceDocument("doc", "indexed text", "doc.md")
+    )
+
+    with pytest.raises(RetrievalError, match="query embedding must contain finite values"):
+        VectorRetriever(embeddings, store).retrieve("query")

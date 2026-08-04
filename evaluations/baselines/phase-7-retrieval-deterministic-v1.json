@@ -2,61 +2,117 @@
   "report_schema_version": 1,
   "suite_id": "phase-7-retrieval-v1",
   "suite_schema_version": 1,
-  "generated_at": "2026-08-01T05:21:24.073055+00:00",
+  "generated_at": "2026-08-03T14:17:33.114467+00:00",
   "summary": {
     "passed": true,
-    "passed_cases": 4,
+    "passed_cases": 7,
     "failed_cases": 0,
-    "executed_cases": 4,
+    "executed_cases": 7,
     "mean_recall_at_k": 1.0,
-    "mean_reciprocal_rank": 1.0
+    "mean_reciprocal_rank": 0.8888888888888888,
+    "expected_no_result_cases": 1,
+    "empty_result_cases": 1
   },
   "results": [
     {
-      "case_id": "refund-window",
+      "case_id": "refund-paraphrase",
       "passed": true,
+      "expected_no_results": false,
       "retrieved_document_ids": [
         "refund-policy",
-        "security-policy"
-      ],
-      "metrics": {
-        "recall_at_k": 1.0,
-        "reciprocal_rank": 1.0
-      }
-    },
-    {
-      "case_id": "support-schedule",
-      "passed": true,
-      "retrieved_document_ids": [
-        "support-hours"
-      ],
-      "metrics": {
-        "recall_at_k": 1.0,
-        "reciprocal_rank": 1.0
-      }
-    },
-    {
-      "case_id": "deployment-gate",
-      "passed": true,
-      "retrieved_document_ids": [
-        "deployment-guide",
+        "adversarial-instructions",
         "refund-policy"
       ],
       "metrics": {
         "recall_at_k": 1.0,
-        "reciprocal_rank": 1.0
+        "reciprocal_rank": 1.0,
+        "no_results": false
       }
     },
     {
-      "case_id": "credential-storage",
+      "case_id": "multi-chunk-production-gate",
       "passed": true,
+      "expected_no_results": false,
       "retrieved_document_ids": [
-        "security-policy",
-        "support-hours"
+        "deployment-guide",
+        "deployment-guide",
+        "deployment-guide"
       ],
       "metrics": {
         "recall_at_k": 1.0,
-        "reciprocal_rank": 1.0
+        "reciprocal_rank": 1.0,
+        "no_results": false
+      }
+    },
+    {
+      "case_id": "distractor-production-gate",
+      "passed": true,
+      "expected_no_results": false,
+      "retrieved_document_ids": [
+        "deployment-guide",
+        "deployment-guide"
+      ],
+      "metrics": {
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "no_results": false
+      }
+    },
+    {
+      "case_id": "multiple-relevant-controls",
+      "passed": true,
+      "expected_no_results": false,
+      "retrieved_document_ids": [
+        "security-distractor",
+        "refund-policy",
+        "deployment-guide",
+        "security-policy",
+        "deployment-guide"
+      ],
+      "metrics": {
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 0.3333333333333333,
+        "no_results": false
+      }
+    },
+    {
+      "case_id": "support-paraphrase",
+      "passed": true,
+      "expected_no_results": false,
+      "retrieved_document_ids": [
+        "support-hours",
+        "support-distractor",
+        "release-distractor"
+      ],
+      "metrics": {
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "no_results": false
+      }
+    },
+    {
+      "case_id": "security-adversarial-passage",
+      "passed": true,
+      "expected_no_results": false,
+      "retrieved_document_ids": [
+        "adversarial-instructions",
+        "security-policy"
+      ],
+      "metrics": {
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "no_results": false
+      }
+    },
+    {
+      "case_id": "no-answer-audit-retention",
+      "passed": true,
+      "expected_no_results": true,
+      "retrieved_document_ids": [],
+      "metrics": {
+        "recall_at_k": null,
+        "reciprocal_rank": null,
+        "no_results": true
       }
     }
   ]
