@@ -124,3 +124,15 @@ class RetrievalError(DQAgentError):
     """Raised when knowledge ingestion, indexing, or retrieval cannot complete."""
 
     category = ErrorCategory.UNAVAILABLE
+
+
+class MemoryError(DQAgentError):
+    """Raised when long-term memory processing cannot complete safely."""
+
+    category = ErrorCategory.UNAVAILABLE
+
+
+class MemoryValidationError(MemoryError, ValueError):
+    """Raised when a long-term memory domain value violates an invariant."""
+
+    category = ErrorCategory.CONFIGURATION
