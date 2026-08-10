@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import Protocol
 
 from dqagent.errors import MemoryValidationError
 
@@ -292,6 +293,140 @@ class MemoryRecord:
             expires_at=self.expires_at,
             schema_version=self.schema_version,
         ).digest
+
+
+class AdmissionAction(StrEnum):
+    ALLOW = "allow"
+    REQUIRE_CONFIRMATION = "require_confirmation"
+    DENY = "deny"
+
+
+class AdmissionReason(StrEnum):
+    WRITE_ALLOWED = "write_allowed"
+    USER_CONFIRMATION_REQUIRED = "user_confirmation_required"
+    SCOPE_MISMATCH = "scope_mismatch"
+    KIND_NOT_ALLOWED = "kind_not_allowed"
+    SENSITIVE_CONTENT_NOT_ALLOWED = "sensitive_content_not_allowed"
+    SECRET_CONTENT_NOT_ALLOWED = "secret_content_not_allowed"
+    PROVENANCE_IN_FUTURE = "provenance_in_future"
+    CANDIDATE_EXPIRED = "candidate_expired"
+
+
+_DENY_ADMISSION_REASONS = frozenset(
+    {
+        AdmissionReason.SCOPE_MISMATCH,
+        AdmissionReason.KIND_NOT_ALLOWED,
+        AdmissionReason.SENSITIVE_CONTENT_NOT_ALLOWED,
+        AdmissionReason.SECRET_CONTENT_NOT_ALLOWED,
+        AdmissionReason.PROVENANCE_IN_FUTURE,
+        AdmissionReason.CANDIDATE_EXPIRED,
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class AdmissionDecision:
+    """Stable machine-readable result of assessing one transient candidate."""
+
+    action: AdmissionAction
+    reason: AdmissionReason
+    effective_scope: MemoryScope | None
+    expires_at: datetime | None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.action, AdmissionAction):
+            raise MemoryValidationError("memory admission action must be an AdmissionAction")
+        if not isinstance(self.reason, AdmissionReason):
+            raise MemoryValidationError("memory admission reason must be an AdmissionReason")
+        if self.action is AdmissionAction.ALLOW:
+            valid_reason = self.reason is AdmissionReason.WRITE_ALLOWED
+        elif self.action is AdmissionAction.REQUIRE_CONFIRMATION:
+            valid_reason = self.reason is AdmissionReason.USER_CONFIRMATION_REQUIRED
+        else:
+            valid_reason = self.reason in _DENY_ADMISSION_REASONS
+        if not valid_reason:
+            raise MemoryValidationError("memory admission action and reason are inconsistent")
+
+        if self.action is AdmissionAction.DENY:
+            if self.effective_scope is not None or self.expires_at is not None:
+                raise MemoryValidationError(
+                    "denied memory admission has no effective scope or expiry"
+                )
+            return
+        if not isinstance(self.effective_scope, MemoryScope):
+            raise MemoryValidationError("admitted memory requires an effective scope")
+        if self.expires_at is not None:
+            _validate_aware_datetime("memory admission expiry", self.expires_at)
+
+    @property
+    def requires_confirmation(self) -> bool:
+        return self.action is AdmissionAction.REQUIRE_CONFIRMATION
+
+
+class RecallEligibilityAction(StrEnum):
+    ELIGIBLE = "eligible"
+    INELIGIBLE = "ineligible"
+
+
+class RecallEligibilityReason(StrEnum):
+    ELIGIBLE = "eligible"
+    SCOPE_MISMATCH = "scope_mismatch"
+    NOT_CONFIRMED_DURABLE_RECORD = "not_confirmed_durable_record"
+    SUPERSEDED = "superseded"
+    EXPIRED_STATUS = "expired_status"
+    NOT_YET_VALID = "not_yet_valid"
+    EXPIRED = "expired"
+    KIND_NOT_ALLOWED = "kind_not_allowed"
+
+
+@dataclass(frozen=True, slots=True)
+class RecallEligibilityDecision:
+    """Stable pre-ranking eligibility result for one candidate or durable record."""
+
+    action: RecallEligibilityAction
+    reason: RecallEligibilityReason
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.action, RecallEligibilityAction):
+            raise MemoryValidationError(
+                "memory recall eligibility action must be a RecallEligibilityAction"
+            )
+        if not isinstance(self.reason, RecallEligibilityReason):
+            raise MemoryValidationError(
+                "memory recall eligibility reason must be a RecallEligibilityReason"
+            )
+        is_eligible = self.action is RecallEligibilityAction.ELIGIBLE
+        if is_eligible != (self.reason is RecallEligibilityReason.ELIGIBLE):
+            raise MemoryValidationError(
+                "memory recall eligibility action and reason are inconsistent"
+            )
+
+    @property
+    def eligible(self) -> bool:
+        return self.action is RecallEligibilityAction.ELIGIBLE
+
+
+class MemoryPolicy(Protocol):
+    """Provider-neutral authority for memory admission and pre-ranking eligibility."""
+
+    identity: str
+
+    def assess_write(
+        self,
+        candidate: MemoryCandidate,
+        *,
+        scope: MemoryScope,
+        now: datetime,
+    ) -> AdmissionDecision: ...
+
+    def eligible(
+        self,
+        record: MemoryCandidate | MemoryRecord,
+        *,
+        scope: MemoryScope,
+        allowed_kinds: frozenset[MemoryKind],
+        now: datetime,
+    ) -> RecallEligibilityDecision: ...
 
 
 @dataclass(frozen=True, slots=True)
