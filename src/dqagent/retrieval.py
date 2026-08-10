@@ -8,7 +8,7 @@ import re
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
@@ -33,7 +33,7 @@ class SourceDocument:
     document_id: str
     content: str
     source: str
-    metadata: Mapping[str, str] = MappingProxyType({})
+    metadata: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
 
     def __post_init__(self) -> None:
         for label, value in (
@@ -55,7 +55,7 @@ class TextChunk:
     start: int
     end: int
     content_digest: str
-    metadata: Mapping[str, str] = MappingProxyType({})
+    metadata: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
 
     def __post_init__(self) -> None:
         if not self.chunk_id.strip() or not self.document_id.strip():

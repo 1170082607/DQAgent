@@ -116,11 +116,11 @@ class ToolRegistry:
 
         executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"dqagent-{call.name}")
         future = executor.submit(tool.handler, arguments, context)
-        tool_deadline = time.monotonic() + tool.timeout_seconds
+        tool_deadline = time.perf_counter() + tool.timeout_seconds
         try:
             while True:
                 context.check_active()
-                tool_remaining = tool_deadline - time.monotonic()
+                tool_remaining = tool_deadline - time.perf_counter()
                 if tool_remaining <= 0:
                     future.cancel()
                     return ToolExecution(

@@ -39,7 +39,7 @@ class RunContext:
         )
         self.metadata: Mapping[str, object] = MappingProxyType(dict(metadata or {}))
         self._parent = _parent
-        self._started_monotonic = time.monotonic()
+        self._started_monotonic = time.perf_counter()
         self._deadline_monotonic = (
             self._started_monotonic + timeout_seconds
             if timeout_seconds is not None
@@ -51,13 +51,13 @@ class RunContext:
 
     @property
     def elapsed_seconds(self) -> float:
-        return max(0.0, time.monotonic() - self._started_monotonic)
+        return max(0.0, time.perf_counter() - self._started_monotonic)
 
     @property
     def remaining_seconds(self) -> float | None:
         if self._deadline_monotonic is None:
             return None
-        return max(0.0, self._deadline_monotonic - time.monotonic())
+        return max(0.0, self._deadline_monotonic - time.perf_counter())
 
     @property
     def is_cancelled(self) -> bool:
@@ -101,10 +101,10 @@ class RunContext:
         """Wait for retry backoff while remaining responsive to cancellation."""
         if not math.isfinite(delay_seconds) or delay_seconds < 0:
             raise ValueError("wait delay must be a finite non-negative number")
-        wait_deadline = time.monotonic() + delay_seconds
+        wait_deadline = time.perf_counter() + delay_seconds
         while True:
             self.check_active()
-            delay_remaining = wait_deadline - time.monotonic()
+            delay_remaining = wait_deadline - time.perf_counter()
             if delay_remaining <= 0:
                 self.check_active()
                 return
