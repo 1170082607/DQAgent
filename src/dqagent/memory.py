@@ -72,7 +72,12 @@ class MemoryConfidence:
     def __post_init__(self) -> None:
         if isinstance(self.value, bool) or not isinstance(self.value, (int, float)):
             raise MemoryValidationError("memory confidence must be a number")
-        normalized = float(self.value)
+        try:
+            normalized = float(self.value)
+        except OverflowError as error:
+            raise MemoryValidationError(
+                "memory confidence must be finite and between zero and one"
+            ) from error
         if not math.isfinite(normalized) or not 0.0 <= normalized <= 1.0:
             raise MemoryValidationError("memory confidence must be finite and between zero and one")
         object.__setattr__(self, "value", 0.0 if normalized == 0.0 else normalized)
@@ -376,6 +381,8 @@ class RecallEligibilityReason(StrEnum):
     EXPIRED_STATUS = "expired_status"
     NOT_YET_VALID = "not_yet_valid"
     EXPIRED = "expired"
+    SENSITIVE_CONTENT_NOT_ALLOWED = "sensitive_content_not_allowed"
+    SECRET_CONTENT_NOT_ALLOWED = "secret_content_not_allowed"
     KIND_NOT_ALLOWED = "kind_not_allowed"
 
 

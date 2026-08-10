@@ -79,7 +79,7 @@ def test_scope_accepts_only_explicit_user_or_project_identity() -> None:
 
 @pytest.mark.parametrize(
     "value",
-    [float("nan"), float("inf"), float("-inf"), -0.01, 1.01, True],
+    [float("nan"), float("inf"), float("-inf"), -0.01, 1.01, 10**400, True],
 )
 def test_confidence_rejects_non_finite_unbounded_or_boolean_values(value: object) -> None:
     with pytest.raises(MemoryValidationError, match="confidence"):

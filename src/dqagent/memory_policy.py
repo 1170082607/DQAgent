@@ -96,7 +96,11 @@ class DefaultMemoryPolicy:
             return _ineligible(RecallEligibilityReason.NOT_YET_VALID)
         if record.expires_at is not None and record.expires_at <= now:
             return _ineligible(RecallEligibilityReason.EXPIRED)
-        if record.kind not in allowed_kinds:
+        if record.sensitivity is MemorySensitivity.SECRET:
+            return _ineligible(RecallEligibilityReason.SECRET_CONTENT_NOT_ALLOWED)
+        if record.sensitivity is MemorySensitivity.SENSITIVE:
+            return _ineligible(RecallEligibilityReason.SENSITIVE_CONTENT_NOT_ALLOWED)
+        if not _kind_allowed_in_scope(record.kind, scope.kind) or record.kind not in allowed_kinds:
             return _ineligible(RecallEligibilityReason.KIND_NOT_ALLOWED)
         return RecallEligibilityDecision(
             action=RecallEligibilityAction.ELIGIBLE,

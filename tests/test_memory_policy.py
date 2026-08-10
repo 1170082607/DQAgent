@@ -231,6 +231,50 @@ def test_default_policy_denies_with_stable_reason(
     )
 
 
+@pytest.mark.parametrize(
+    ("candidate", "reason"),
+    [
+        (
+            make_candidate(sensitivity=MemorySensitivity.SENSITIVE),
+            RecallEligibilityReason.SENSITIVE_CONTENT_NOT_ALLOWED,
+        ),
+        (
+            make_candidate(sensitivity=MemorySensitivity.SECRET),
+            RecallEligibilityReason.SECRET_CONTENT_NOT_ALLOWED,
+        ),
+        (
+            make_candidate(kind=MemoryKind.EXPERIENCE),
+            RecallEligibilityReason.KIND_NOT_ALLOWED,
+        ),
+        (
+            make_candidate(scope=PROJECT_SCOPE, kind=MemoryKind.PREFERENCE),
+            RecallEligibilityReason.KIND_NOT_ALLOWED,
+        ),
+    ],
+)
+def test_recall_rejects_records_that_default_policy_would_not_admit(
+    candidate: MemoryCandidate,
+    reason: RecallEligibilityReason,
+) -> None:
+    policy = DefaultMemoryPolicy()
+
+    assert policy.assess_write(candidate, scope=candidate.scope, now=NOW).action is (
+        AdmissionAction.DENY
+    )
+
+    decision = policy.eligible(
+        make_record(candidate),
+        scope=candidate.scope,
+        allowed_kinds=ALL_KINDS,
+        now=NOW,
+    )
+
+    assert decision == RecallEligibilityDecision(
+        action=RecallEligibilityAction.INELIGIBLE,
+        reason=reason,
+    )
+
+
 def test_high_confidence_never_replaces_confirmation_or_establishes_truth() -> None:
     candidate = make_candidate(confidence=1.0)
 
