@@ -71,6 +71,16 @@ class RunScope:
         self._ensure_running()
         self._emitter.emit(event_type, RunState.RUNNING, attributes)
 
+    def emit_if_active(
+        self,
+        event_type: RunEventType,
+        attributes: Mapping[str, object] | None = None,
+    ) -> None:
+        """Record a stage event only if cancellation/deadline has not won the race."""
+        self._validate_stage_event(event_type)
+        self._ensure_running()
+        self._emitter.emit_if_active(event_type, RunState.RUNNING, attributes)
+
     def emit_error(
         self,
         event_type: RunEventType,

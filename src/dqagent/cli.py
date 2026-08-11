@@ -13,6 +13,10 @@ from dqagent.builtin_tools import create_builtin_tool_registry
 from dqagent.config import ModelProvider, Settings
 from dqagent.context import ContextBudget, ContextBuilder, PromptAssembler, PromptSection
 from dqagent.errors import DQAgentError
+from dqagent.memory import MemoryScope, MemoryScopeKind
+from dqagent.memory_policy import DefaultMemoryPolicy
+from dqagent.memory_service import MemoryService
+from dqagent.memory_store import SqliteMemoryStore
 from dqagent.providers import create_llm_client
 from dqagent.retrieval import HashingEmbeddingProvider, JsonFileVectorStore, VectorRetriever
 from dqagent.runtime import AgentRuntime, RetryPolicy
@@ -36,6 +40,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--retrieval-limit", type=int, default=5)
     parser.add_argument("--retrieval-min-score", type=float, default=0.05)
+    parser.add_argument(
+        "--memory-database",
+        "--memory-db",
+        dest="memory_database",
+        type=Path,
+        help="Enable read-only memory recall for a durable session using this SQLite database.",
+    )
+    parser.add_argument(
+        "--memory-scope-kind",
+        choices=[scope.value for scope in MemoryScopeKind],
+        help="Exact memory scope kind; required when memory recall is enabled.",
+    )
+    parser.add_argument(
+        "--memory-scope-id",
+        help="Exact memory scope ID; required when memory recall is enabled.",
+    )
     parser.add_argument("--model", help="Override DQAGENT_MODEL.")
     parser.add_argument("--system", help="Optional system prompt for this session.")
     parser.add_argument(
@@ -86,6 +106,28 @@ def _settings_from_args(args: argparse.Namespace) -> Settings:
     return Settings.from_env(environ)
 
 
+def _memory_configuration_from_args(
+    args: argparse.Namespace,
+) -> tuple[MemoryService | None, MemoryScope | None]:
+    memory_flags = (
+        args.memory_database is not None
+        or args.memory_scope_kind is not None
+        or args.memory_scope_id is not None
+    )
+    if not memory_flags:
+        return None, None
+    if args.session_id is None:
+        raise ValueError("memory recall requires --session-id")
+    if args.memory_database is None:
+        raise ValueError("memory recall requires --memory-database")
+    if args.memory_scope_kind is None or args.memory_scope_id is None:
+        raise ValueError(
+            "memory recall requires --memory-scope-kind and --memory-scope-id"
+        )
+    scope = MemoryScope(MemoryScopeKind(args.memory_scope_kind), args.memory_scope_id)
+    return MemoryService(SqliteMemoryStore(args.memory_database), DefaultMemoryPolicy()), scope
+
+
 def _interactive_chat(
     app: ChatApplication | AgentApplication | SessionAgentApplication,
 ) -> int:
@@ -120,6 +162,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         settings = _settings_from_args(args)
         if args.retrieval_index is not None and args.session_id is None:
             raise ValueError("--retrieval-index requires --session-id")
+        memory_service, memory_scope = _memory_configuration_from_args(args)
         runtime = AgentRuntime(
             create_llm_client(settings),
             create_builtin_tool_registry(),
@@ -153,6 +196,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     retriever=retriever,
                     retrieval_limit=args.retrieval_limit,
                     retrieval_min_score=args.retrieval_min_score,
+                    memory_service=memory_service,
+                    memory_scope=memory_scope,
                 )
             else:
                 app = SessionAgentApplication.resume(
@@ -163,6 +208,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     retriever=retriever,
                     retrieval_limit=args.retrieval_limit,
                     retrieval_min_score=args.retrieval_min_score,
+                    memory_service=memory_service,
+                    memory_scope=memory_scope,
                 )
         else:
             app = AgentApplication(runtime, system_prompt=args.system)

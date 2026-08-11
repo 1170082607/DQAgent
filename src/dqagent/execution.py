@@ -2,13 +2,16 @@
 
 import math
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
-from threading import Event, Lock
+from threading import Event, RLock
 from types import MappingProxyType
+from typing import TypeVar
 from uuid import uuid4
 
 from dqagent.errors import RunCancelledError, RunDeadlineExceededError
+
+T = TypeVar("T")
 
 
 class RunContext:
@@ -46,7 +49,7 @@ class RunContext:
             else None
         )
         self._cancelled = Event()
-        self._cancel_lock = Lock()
+        self._cancel_lock: RLock = _parent._cancel_lock if _parent is not None else RLock()
         self._cancel_reason: str | None = None
 
     @property
@@ -84,8 +87,19 @@ class RunContext:
             return True
 
     def check_active(self) -> None:
-        if self._parent is not None:
-            self._parent.check_active()
+        with self._cancel_lock:
+            if self._parent is not None:
+                self._parent.check_active()
+            self._check_local_active()
+
+    def run_if_active(self, operation: Callable[[], T]) -> T:
+        """Run a short operation while cancellation cannot pass its active check."""
+        with self._cancel_lock:
+            self.check_active()
+            self._check_active_tree()
+            return operation()
+
+    def _check_local_active(self) -> None:
         if self._cancelled.is_set():
             raise RunCancelledError(
                 self._cancel_reason or "run cancelled",
@@ -96,6 +110,11 @@ class RunContext:
                 "agent run deadline exceeded",
                 run_id=self.run_id,
             )
+
+    def _check_active_tree(self) -> None:
+        if self._parent is not None:
+            self._parent._check_active_tree()
+        self._check_local_active()
 
     def wait(self, delay_seconds: float) -> None:
         """Wait for retry backoff while remaining responsive to cancellation."""

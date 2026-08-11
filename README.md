@@ -4,9 +4,9 @@ DQAgent is an engineering-first learning project for building AI Agent capabilit
 from foundational components. Its purpose is to understand the design of production-oriented agent
 systems instead of treating frameworks as black boxes.
 
-**Status:** Pre-alpha. Phase 7 is implemented: DQAgent now supports durable bounded sessions plus an
-explicit local RAG lifecycle with document replacement/deletion, provider-neutral embedding and
-retrieval boundaries, citation provenance, and independent retrieval evaluation.
+**Status:** Pre-alpha. Phase 8 T9 is implemented: DQAgent supports durable bounded sessions,
+explicit local RAG, and optional exact-scope read-only memory recall with provider-neutral
+boundaries, citation/memory provenance, and deterministic regression evaluations.
 
 ## Goals
 
@@ -84,13 +84,15 @@ retrieval boundaries, citation provenance, and independent retrieval evaluation.
   explicit result payloads only.
 - Request-time memory recall projected into bounded context as lower-authority untrusted user data,
   with atomic record omission, independent budgeting, and content-free projection evidence.
+- Optional read-only memory recall in durable `dqagent` sessions with an explicit SQLite database
+  and exact user/project scope; typed recall dependency failures fall back without memory.
 - Environment-based configuration with explicit validation.
 - Unit tests, Ruff linting, mypy strict type checking, and GitHub Actions CI.
 
-Chat memory orchestration, model-assisted extraction, streaming, hard
-execution isolation, approval policy, distributed session/workflow leases, durable telemetry delivery,
-LLM-as-judge, and repeated live-model sampling remain deferred. Evaluation, security, durability, and
-observability remain continuous constraints for later phases.
+Model-assisted extraction and automatic memory writes, streaming, hard execution isolation, approval
+policy, distributed session/workflow leases, durable telemetry delivery, LLM-as-judge, and repeated
+live-model sampling remain deferred. Evaluation, security, durability, and observability remain
+continuous constraints for later phases.
 
 ## Installation
 

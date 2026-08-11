@@ -255,7 +255,22 @@ meet this phase's objective.
 - [x] Regression-test disabled memory behavior against the Phase 6/7 context checkpoint and test
   empty recall, prompt injection-shaped memory, budget omission, and RAG separation.
 
-Chat integration and model-assisted extraction remain later Phase 8 work.
+**T9 delivered:**
+
+- [x] Add optional exact-scope, read-only memory recall to the `SessionAgentApplication` run with
+  the required retrieval -> memory -> context -> runtime -> session CAS order.
+- [x] Emit coordinator-scoped memory recall lifecycle events with content-free attributes and keep
+  typed memory failures best effort without weakening cancellation, deadline, or unknown-failure
+  handling.
+- [x] Expose recall and context projection evidence without writing memory or context projections
+  to durable session transcripts; session CAS remains outside memory operations.
+- [x] Add explicit memory database and scope configuration to the durable-session `dqagent` CLI,
+  while preserving disabled Phase 6/7 behavior.
+- [x] Test cross-session recall, exact scope isolation, empty recall, fallback, cancellation,
+  deadlines, unexpected failures, RAG ordering, untrusted memory projection, CAS behavior, and
+  CLI configuration validation.
+
+Model-assisted extraction and automatic memory writes remain later Phase 8 work.
 
 ### Phase 9: Coding Agent Harness and Safety
 

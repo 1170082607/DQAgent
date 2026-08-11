@@ -2,10 +2,11 @@
 
 ## Status
 
-This document describes the implemented Phase 8 T8 architecture. Memory management is available as
-a model-free explicit application service, request-time policy-filtered recall, a bounded context
-projection, and an independent `dqagent-memory` CLI; chat integration, model-assisted extraction,
-hard execution isolation, and other future capabilities remain in the [roadmap](roadmap.md).
+This document describes the implemented Phase 8 T9 architecture. Memory management is available as
+a model-free explicit application service, request-time policy-filtered recall, an optional durable
+session read stage, a bounded context projection, and independent memory/session CLI composition;
+model-assisted extraction, automatic memory writes, hard execution isolation, and other future
+capabilities remain in the [roadmap](roadmap.md).
 
 ## System Context
 
@@ -33,6 +34,7 @@ Workflow input -> WorkflowRunner -> validated node graph -> WorkflowRunResult
                         +-> RunContext + shared lifecycle events
 
 Session ID -> SessionAgentApplication -> RunCoordinator -> Retriever
+                       |                        +-> MemoryService -> exact MemoryScope
                        |                        +-> ContextBuilder
                        |                        +-> AgentRuntime
                        |
@@ -58,8 +60,11 @@ state. Every memory command receives `--scope-kind` and `--scope-id` explicitly.
 defaults to `.local/memory.sqlite3` and can be overridden with `--database`.
 
 When `--session-id` is supplied, the CLI composes `JsonFileSessionStore`, `PromptAssembler`, and
-`ContextBuilder` around `SessionAgentApplication`. A later process using the same ID resumes the
-stored transcript. Without that flag, the original in-memory `AgentApplication` behavior remains.
+`ContextBuilder` around `SessionAgentApplication`. Optional read-only memory recall is composed only
+when `--memory-database`, `--memory-scope-kind`, and `--memory-scope-id` are all supplied; the
+application receives one `MemoryService` and one exact `MemoryScope`. A later process using the same
+ID resumes the stored transcript. Without `--session-id`, memory configuration is rejected and the
+original `AgentApplication` behavior remains.
 
 The evaluation CLI is a separate composition root. It loads versioned cases, selects either a
 scripted or live `LLMClient`, creates an isolated production runtime per case, and writes a structured
@@ -418,6 +423,21 @@ from system messages, summaries, RAG passages, and durable session transcripts. 
 returns content-free projection evidence and `CONTEXT_ASSEMBLED` adds only memory IDs, kinds,
 counts, scores, selector identity, and budget metrics to its event attributes.
 
+For a durable session run, `SessionAgentApplication` owns the complete stage sequence:
+
+```text
+transcript + current request -> retrieval -> optional memory recall -> bounded context
+                             -> AgentRuntime.execute -> successful session CAS
+```
+
+Memory recall events use the same `RunScope` as retrieval and runtime events. Started and completed
+events expose only scope kind/digest, query digest/size, selector and bounded selection metrics;
+failed events omit exception messages so memory scope and record content cannot leak through event
+attributes. A `dqagent.errors.MemoryError` emits a failed stage event and continues without memory.
+Cancellation, deadline exhaustion, and unknown exceptions escape to `RunCoordinator`, which emits
+the terminal run event and prevents the session CAS. The application calls only `MemoryService.recall`;
+there is no chat memory write path.
+
 ## Retrieval-Augmented Generation
 
 `SourceDocument` defines an external source revision through document identity, content, citation
@@ -482,7 +502,7 @@ source linkage, not semantic entailment.
 
 ```text
 CLI -> AgentApplication -> RunCoordinator + AgentRuntime
-CLI -> SessionAgentApplication -> RunCoordinator + ContextBuilder + SessionStore + AgentRuntime
+CLI -> SessionAgentApplication -> RunCoordinator + Retriever + MemoryService + ContextBuilder + SessionStore + AgentRuntime
 RunCoordinator -> RunContext + RunEventEmitter + EventSink
 AgentRuntime -> RunScope + LLMClient + ToolRegistry + neutral models
 ToolRegistry -> RunContext + neutral models + jsonschema
@@ -498,7 +518,7 @@ ContextBuilder + SessionSnapshot -> transcript validator + MemoryRecall + neutra
 ContextEvaluationRunner -> ContextBuilder + neutral models
 DocumentIngestor -> DocumentChunker + EmbeddingProvider + VectorStore
 VectorRetriever -> EmbeddingProvider + VectorStore
-SessionAgentApplication -> RunCoordinator + Retriever + ContextBuilder + SessionStore + AgentRuntime
+SessionAgentApplication -> RunCoordinator + Retriever + MemoryService + explicit MemoryScope + ContextBuilder + SessionStore + AgentRuntime
 RetrievalEvaluationRunner -> DocumentIngestor + VectorRetriever
 MemoryService -> MemoryPolicy + MemoryConsolidator + MemoryStore + MemorySelector
 MemorySelector -> EmbeddingProvider
@@ -558,6 +578,10 @@ the runtime's model-attempt budget and defaults to three. All values are validat
   confirmation rejection/EOF zero-write behavior, sensitive-payload suppression, cross-instance
   SQLite visibility, lifecycle/provenance output, correction, forgetting, tombstones, and stable
   exit/error streams.
+- Session memory integration tests assert exact cross-session scope behavior, irrelevant queries,
+  best-effort typed failures, cancellation/deadline/unknown failure handling, RAG ordering,
+  lower-authority memory projection, disabled-path regression, CLI composition, and no memory write
+  on session CAS failure.
 - CI runs Ruff, strict mypy, and pytest with at least 85% coverage.
 - CI also runs the credential-free deterministic behavioral suite after implementation tests.
 

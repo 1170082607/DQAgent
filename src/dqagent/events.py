@@ -28,6 +28,9 @@ class RunEventType(StrEnum):
     RETRIEVAL_STARTED = "retrieval_started"
     RETRIEVAL_COMPLETED = "retrieval_completed"
     RETRIEVAL_FAILED = "retrieval_failed"
+    MEMORY_RECALL_STARTED = "memory_recall_started"
+    MEMORY_RECALL_COMPLETED = "memory_recall_completed"
+    MEMORY_RECALL_FAILED = "memory_recall_failed"
     CONTEXT_ASSEMBLED = "context_assembled"
     MODEL_REQUEST_STARTED = "model_request_started"
     MODEL_REQUEST_COMPLETED = "model_request_completed"
@@ -87,6 +90,26 @@ class RunEventEmitter:
         state: RunState,
         attributes: Mapping[str, object] | None = None,
     ) -> None:
+        self._notify(self._append(event_type, state, attributes))
+
+    def emit_if_active(
+        self,
+        event_type: RunEventType,
+        state: RunState,
+        attributes: Mapping[str, object] | None = None,
+    ) -> None:
+        """Append one event while its context remains active, then notify sinks."""
+        event = self._context.run_if_active(
+            lambda: self._append(event_type, state, attributes)
+        )
+        self._notify(event)
+
+    def _append(
+        self,
+        event_type: RunEventType,
+        state: RunState,
+        attributes: Mapping[str, object] | None,
+    ) -> RunEvent:
         event = RunEvent(
             run_id=self._context.run_id,
             sequence=len(self._events) + 1,
@@ -97,6 +120,9 @@ class RunEventEmitter:
             attributes=attributes or {},
         )
         self._events.append(event)
+        return event
+
+    def _notify(self, event: RunEvent) -> None:
         for sink in self._sinks:
             try:
                 sink.emit(event)
