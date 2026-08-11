@@ -29,17 +29,27 @@ from dqagent.memory import (
     MemoryCandidate,
     MemoryConfirmation,
     MemoryForgetReason,
+    MemoryKind,
     MemoryLifecycleStatus,
     MemoryPolicy,
     MemoryRecord,
     MemoryScope,
     MemorySensitivity,
     MemoryTombstone,
+    RecallEligibilityDecision,
+    RecallEligibilityReason,
 )
 from dqagent.memory_consolidation import (
     ConsolidationAction,
     MemoryConsolidationDecision,
     MemoryConsolidator,
+)
+from dqagent.memory_recall import (
+    MemoryMatch,
+    MemoryMatchReason,
+    MemoryRecall,
+    MemoryRecallRequest,
+    MemorySelector,
 )
 from dqagent.memory_store import (
     AddMemory,
@@ -52,6 +62,7 @@ from dqagent.memory_store import (
     RefreshMemory,
     SupersedeMemory,
 )
+from dqagent.retrieval import HashingEmbeddingProvider
 
 __all__ = [
     "MemoryConfirmResult",
@@ -65,6 +76,11 @@ __all__ = [
     "MemoryOutcome",
     "MemoryPreview",
     "MemoryProposal",
+    "MemoryMatch",
+    "MemoryMatchReason",
+    "MemoryRecall",
+    "MemoryRecallRequest",
+    "MemorySelector",
     "MemoryService",
     "MemoryShowResult",
     "MemoryWriteOutcome",
@@ -75,6 +91,7 @@ class MemoryOperation(StrEnum):
     PROPOSE = "propose"
     CONFIRM = "confirm"
     LIST = "list"
+    RECALL = "recall"
     SHOW = "show"
     CORRECT = "correct"
     FORGET = "forget"
@@ -85,6 +102,7 @@ class MemoryOutcome(StrEnum):
     ADDED = "added"
     REFRESHED = "refreshed"
     LISTED = "listed"
+    RECALLED = "recalled"
     SHOWN = "shown"
     CORRECTED = "corrected"
     FORGOTTEN = "forgotten"
@@ -322,6 +340,7 @@ class MemoryService:
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         id_factory: Callable[[], str] = lambda: str(uuid4()),
         consolidator: MemoryConsolidator | None = None,
+        selector: MemorySelector | None = None,
     ) -> None:
         if not callable(getattr(store, "load", None)) or not callable(
             getattr(store, "apply", None)
@@ -341,11 +360,14 @@ class MemoryService:
             raise MemoryValidationError("memory service ID factory must be callable")
         if consolidator is not None and not callable(getattr(consolidator, "decide", None)):
             raise MemoryValidationError("memory service consolidator must implement decide")
+        if selector is not None and not callable(getattr(selector, "select", None)):
+            raise MemoryValidationError("memory service selector must implement select")
         self._store = store
         self._policy = policy
         self._clock = clock
         self._id_factory = id_factory
         self._consolidator = consolidator or MemoryConsolidator()
+        self._selector = selector or MemorySelector(HashingEmbeddingProvider())
 
     def propose(self, candidate: MemoryCandidate, *, scope: MemoryScope) -> MemoryProposal:
         """Return a transient preview; this method never calls the store."""
@@ -480,6 +502,42 @@ class MemoryService:
                 record_count=len(snapshot.records),
             ),
         )
+
+    def recall(self, request: MemoryRecallRequest) -> MemoryRecall:
+        """Recall policy-eligible records from one exact scope at request time."""
+
+        if not isinstance(request, MemoryRecallRequest):
+            raise MemoryValidationError("memory recall requires a MemoryRecallRequest")
+        scope = request.scope
+        now = self._now(MemoryOperation.RECALL, scope)
+        snapshot = self._load(MemoryOperation.RECALL, scope)
+        eligible = self._eligible_for_recall(snapshot, request=request, now=now)
+        try:
+            result = self._selector.select(eligible, request)
+        except MemoryServiceError:
+            raise
+        except Exception:
+            raise self._dependency_error(
+                MemoryOperation.RECALL,
+                scope,
+                reason="selector_failure",
+            ) from None
+        if (
+            not isinstance(result, MemoryRecall)
+            or result.request != request
+            or result.candidate_count != len(eligible)
+            or not _service_recall_result_is_valid(
+                result,
+                eligible,
+                request=request,
+            )
+        ):
+            raise self._dependency_error(
+                MemoryOperation.RECALL,
+                scope,
+                reason="invalid_selector_result",
+            )
+        return result
 
     def show(
         self,
@@ -800,6 +858,46 @@ class MemoryService:
             )
         return decision
 
+    def _eligible_for_recall(
+        self,
+        snapshot: MemoryScopeSnapshot,
+        *,
+        request: MemoryRecallRequest,
+        now: datetime,
+    ) -> tuple[MemoryRecord, ...]:
+        eligible: list[MemoryRecord] = []
+        for record in snapshot.records:
+            try:
+                decision = self._policy.eligible(
+                    record,
+                    scope=request.scope,
+                    allowed_kinds=request.allowed_kinds,
+                    now=now,
+                )
+            except MemoryServiceError:
+                raise
+            except Exception:
+                raise self._dependency_error(
+                    MemoryOperation.RECALL,
+                    request.scope,
+                    reason="policy_failure",
+                ) from None
+            if not isinstance(decision, RecallEligibilityDecision):
+                raise self._dependency_error(
+                    MemoryOperation.RECALL,
+                    request.scope,
+                    reason="invalid_policy_decision",
+                )
+            if not decision.eligible or _service_recall_ineligibility(
+                record,
+                scope=request.scope,
+                allowed_kinds=request.allowed_kinds,
+                now=now,
+            ) is not None:
+                continue
+            eligible.append(record)
+        return tuple(sorted(eligible, key=lambda record: record.memory_id))
+
     def _consolidate(
         self,
         snapshot: MemoryScopeSnapshot,
@@ -1085,6 +1183,60 @@ class MemoryService:
             candidate_digest=candidate_digest,
             reason="not_found",
         )
+
+
+def _service_recall_result_is_valid(
+    result: MemoryRecall,
+    eligible: tuple[MemoryRecord, ...],
+    *,
+    request: MemoryRecallRequest,
+) -> bool:
+    expected = {record.memory_id: record for record in eligible}
+    returned = (*result.matches, *result.omitted)
+    if {match.memory_id for match in returned} != set(expected):
+        return False
+    if any(expected[match.memory_id] != match.record for match in returned):
+        return False
+    if len(result.matches) > request.max_records:
+        return False
+    if any(
+        match.score < request.min_score or match.record.kind not in request.allowed_kinds
+        for match in result.matches
+    ):
+        return False
+    return sum(len(match.record.content) for match in result.matches) <= request.max_characters
+
+
+def _service_recall_ineligibility(
+    record: MemoryRecord,
+    *,
+    scope: MemoryScope,
+    allowed_kinds: frozenset[MemoryKind],
+    now: datetime,
+) -> RecallEligibilityReason | None:
+    """Keep safety-critical recall filters enforced at the service boundary."""
+
+    if not isinstance(record, MemoryRecord):
+        return RecallEligibilityReason.NOT_CONFIRMED_DURABLE_RECORD
+    if record.scope != scope:
+        return RecallEligibilityReason.SCOPE_MISMATCH
+    if record.status is MemoryLifecycleStatus.SUPERSEDED:
+        return RecallEligibilityReason.SUPERSEDED
+    if record.status is MemoryLifecycleStatus.EXPIRED:
+        return RecallEligibilityReason.EXPIRED_STATUS
+    if record.status is not MemoryLifecycleStatus.ACTIVE:
+        return RecallEligibilityReason.EXPIRED_STATUS
+    if record.valid_from > now:
+        return RecallEligibilityReason.NOT_YET_VALID
+    if record.expires_at is not None and record.expires_at <= now:
+        return RecallEligibilityReason.EXPIRED
+    if record.sensitivity is MemorySensitivity.SECRET:
+        return RecallEligibilityReason.SECRET_CONTENT_NOT_ALLOWED
+    if record.sensitivity is MemorySensitivity.SENSITIVE:
+        return RecallEligibilityReason.SENSITIVE_CONTENT_NOT_ALLOWED
+    if record.kind not in allowed_kinds:
+        return RecallEligibilityReason.KIND_NOT_ALLOWED
+    return None
 
 
 def _require_candidate(candidate: object) -> None:

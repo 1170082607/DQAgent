@@ -2,10 +2,10 @@
 
 ## Status
 
-This document describes the implemented Phase 8 T6 architecture. Memory management is available as
-a model-free explicit application service and an independent `dqagent-memory` CLI; memory
-recall/ranking, context integration, chat integration, model-assisted extraction, hard execution
-isolation, and other future capabilities remain in the [roadmap](roadmap.md).
+This document describes the implemented Phase 8 T7 architecture. Memory management is available as
+a model-free explicit application service, request-time policy-filtered recall, and an independent
+`dqagent-memory` CLI; context integration, chat integration, model-assisted extraction, hard
+execution isolation, and other future capabilities remain in the [roadmap](roadmap.md).
 
 ## System Context
 
@@ -43,6 +43,10 @@ Context case -> ContextEvaluationRunner -> production ContextBuilder -> context 
 Memory management request -> dqagent-memory CLI -> MemoryService
                                       |             +-> MemoryPolicy + MemoryConsolidator + MemoryStore
                                       +-> explicit scope, confirmation, and output boundary
+
+MemoryRecallRequest -> MemoryService -> exact-scope MemoryStore + MemoryPolicy
+                                      +-> MemorySelector -> EmbeddingProvider
+                                      +-> MemoryRecall (selected/omitted matches)
 ```
 
 The main CLI is the composition root for model-backed chat. The independent `dqagent-memory` CLI is
@@ -124,6 +128,18 @@ Memory result objects may contain records because they are the application paylo
 caller. Their `MemoryEventMetadata`, and the metadata attached to service errors, contain only
 operation, outcome/reason, scope, revision, IDs, counts, and candidate digests. They never copy
 memory content into event-ready or error metadata.
+
+`MemoryService.recall` loads only the request's exact scope, then calls `MemoryPolicy.eligible` and
+enforces the durable-record, active, validity, sensitivity, and kind boundary before invoking the
+selector. Ineligible records never enter an embedding call. `MemorySelector` embeds eligible record
+content and the query for each request, scores with a dot product, breaks ties by memory ID, and
+reports its provider-qualified identity. It applies minimum score, maximum record count, kind
+allowlist, and a character budget after ranking; records are selected or omitted atomically. The
+recall character budget counts record content characters, and an empty recall is a successful,
+explicit result. Scores describe query relevance only; they do not establish truth, confidence, or
+consent. Eligibility, request-time embedding, and score computation are O(N) in the number of
+eligible records with O(N) transient vector storage; the complete deterministic ordering adds the
+usual O(N log N) comparison cost. There is no persistent vector index.
 
 The memory CLI previews remember/correct candidates through a process-local, non-persistent service.
 It prints the exact candidate fields and digest, then accepts only `yes` or `confirm`; a rejection or
@@ -471,7 +487,8 @@ DocumentIngestor -> DocumentChunker + EmbeddingProvider + VectorStore
 VectorRetriever -> EmbeddingProvider + VectorStore
 SessionAgentApplication -> RunCoordinator + Retriever + ContextBuilder + SessionStore + AgentRuntime
 RetrievalEvaluationRunner -> DocumentIngestor + VectorRetriever
-MemoryService -> MemoryPolicy + MemoryConsolidator + MemoryStore
+MemoryService -> MemoryPolicy + MemoryConsolidator + MemoryStore + MemorySelector
+MemorySelector -> EmbeddingProvider
 ```
 
 - Session state is owned above the runtime; one run cannot commit partial history.
@@ -486,8 +503,8 @@ MemoryService -> MemoryPolicy + MemoryConsolidator + MemoryStore
 - Retrieval content is request-scoped external data, not durable session state or long-term memory.
 - MemoryService owns memory policy/consolidation orchestration; MemoryStore only loads exact scopes
   and applies validated change sets. The store has no remember/retrieve/sensitivity policy.
-- Memory candidates are transient; there is no persistent pending-candidate queue. Memory is not
-  connected to the model, retrieval ranking, active context, or chat orchestration in T6.
+- Memory candidates are transient; there is no persistent pending-candidate queue. Recall is not
+  connected to the model, retrieval ranking, active context, or chat orchestration in T7.
 
 ## Configuration
 
@@ -543,9 +560,9 @@ nondeterminism make it an unsuitable correctness gate.
   distributed lease, append-only history, migration framework, tenant isolation, or retention policy.
 - Context budgets estimate characters rather than provider tokens. Structural and model summaries
   are lossy, and model summarization adds a provider call before the main agent run.
-- Memory management is explicit and cross-session through its service/stores and
-  `dqagent-memory` CLI, but there is no memory ranking, recall/context projection, chat integration,
-  or model-assisted extraction yet.
+- Memory management and request-time recall are explicit and cross-session through the service,
+  stores, selector, and `dqagent-memory` CLI; there is no recall/context projection, chat
+  integration, or model-assisted extraction yet.
 - The retrieval store is small, synchronous, single-process, and brute-force. Hashing embeddings are
   lexical, exact digest deduplication misses near-duplicates, and answer checks use explicit lexical
   claims rather than a semantic or LLM-based judge.

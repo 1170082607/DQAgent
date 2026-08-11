@@ -234,8 +234,18 @@ meet this phase's objective.
 - [x] Keep CLI policy and persistence behind `MemoryService`; test sensitive denial, rejection/EOF
   zero-write behavior, stable output/error contracts, and cross-instance SQLite visibility.
 
-Memory ranking, recall/context integration, chat integration, and model-assisted extraction remain
-later Phase 8 work.
+**T7 delivered:**
+
+- [x] Add policy-filtered, deterministic, request-time recall with exact scope isolation and no
+  persistent memory vector index.
+- [x] Reuse the provider-neutral embedding boundary for eligible records and the query, with stable
+  scores, selector identity, tie-breaking, score/count/kind/character post-rank limits, and atomic
+  record selection.
+- [x] Test filter-before-rank, scope isolation, expired and superseded exclusion, ranking ties,
+  explicit no-result behavior, bounded recall, and harmful over-retrieval.
+
+Recall/context integration, chat integration, and model-assisted extraction remain later Phase 8
+work.
 
 ### Phase 9: Coding Agent Harness and Safety
 
