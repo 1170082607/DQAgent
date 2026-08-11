@@ -1,9 +1,12 @@
 """Reusable contract tests for transactional MemoryStore adapters."""
 
+import sqlite3
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import FrozenInstanceError, replace
-from datetime import UTC, datetime, timedelta
-from threading import Barrier
+from datetime import UTC, datetime, timedelta, timezone
+from pathlib import Path
+from threading import Barrier, Event
 
 import pytest
 
@@ -11,7 +14,9 @@ from dqagent.errors import (
     MemoryConflictError,
     MemoryCorruptChangeError,
     MemoryNotFoundError,
+    MemoryValidationError,
 )
+from dqagent.errors import MemoryError as DQMemoryError
 from dqagent.memory import (
     MemoryCandidate,
     MemoryConfidence,
@@ -36,6 +41,7 @@ from dqagent.memory_store import (
     MemoryScopeSnapshot,
     MemoryStore,
     RefreshMemory,
+    SqliteMemoryStore,
     SupersedeMemory,
 )
 
@@ -477,7 +483,336 @@ class TestInMemoryMemoryStore(MemoryStoreContract):
         return InMemoryMemoryStore()
 
 
+class TestSqliteMemoryStore(MemoryStoreContract):
+    __test__ = True
+
+    @pytest.fixture
+    def store(self, tmp_path: Path) -> MemoryStore:
+        return SqliteMemoryStore(tmp_path / "memory.sqlite3")
+
+
 def test_in_memory_adapter_satisfies_memory_store_protocol() -> None:
     store: MemoryStore = InMemoryMemoryStore()
 
     assert store.load(USER_SCOPE) == MemoryScopeSnapshot(USER_SCOPE)
+
+
+def test_sqlite_adapter_initializes_v1_schema_metadata(tmp_path: Path) -> None:
+    path = tmp_path / "memory.sqlite3"
+
+    store = SqliteMemoryStore(path)
+
+    with sqlite3.connect(path) as connection:
+        version = connection.execute(
+            "SELECT value FROM memory_metadata WHERE key = ?",
+            ("schema_version",),
+        ).fetchone()
+    adapter_connection = store._connect()
+    try:
+        secure_delete = adapter_connection.execute("PRAGMA secure_delete").fetchone()
+    finally:
+        adapter_connection.close()
+    assert version == (1,)
+    assert secure_delete is not None
+    assert secure_delete[0] == 1
+
+
+def test_sqlite_adapter_rejects_unsupported_schema_version(tmp_path: Path) -> None:
+    path = tmp_path / "memory.sqlite3"
+    SqliteMemoryStore(path)
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "UPDATE memory_metadata SET value = ? WHERE key = ?",
+            (99, "schema_version"),
+        )
+
+    with pytest.raises(DQMemoryError, match="unsupported memory database schema version"):
+        SqliteMemoryStore(path)
+
+
+def test_sqlite_round_trips_complete_provenance_and_timezone(tmp_path: Path) -> None:
+    path = tmp_path / "memory.sqlite3"
+    store = SqliteMemoryStore(path)
+    local_timezone = timezone(timedelta(hours=8))
+    extracted_at = datetime(2026, 8, 11, 15, 55, tzinfo=local_timezone)
+    candidate = MemoryCandidate(
+        scope=MemoryScope(MemoryScopeKind.PROJECT, "project-4"),
+        kind=MemoryKind.EXPERIENCE,
+        topic="deployment.rollback",
+        content="Verify the health check before completing a rollback.",
+        confidence=MemoryConfidence(0.75),
+        sensitivity=MemorySensitivity.NON_SENSITIVE,
+        provenance=MemoryProvenance(
+            source_type=MemorySourceType.COMMITTED_SESSION_TURN,
+            source_item_digest="b" * 64,
+            extractor_identity="sqlite-roundtrip",
+            extracted_at=extracted_at,
+            source_id="session-9",
+            source_revision=3,
+            run_id="run-12",
+        ),
+        valid_from=extracted_at - timedelta(days=1),
+        expires_at=extracted_at + timedelta(days=30),
+    )
+    record = MemoryRecord.from_candidate(
+        candidate,
+        memory_id="memory-roundtrip",
+        revision=1,
+        confirmation=MemoryConfirmation(candidate.digest, extracted_at + timedelta(minutes=1)),
+        created_at=extracted_at + timedelta(minutes=2),
+    )
+
+    saved = store.apply(
+        MemoryChangeSet(candidate.scope, (AddMemory(record),)),
+        expected_revision=0,
+    )
+
+    assert store.load(candidate.scope) == saved
+    assert saved.records == (record,)
+    assert saved.records[0].provenance == candidate.provenance
+    assert saved.records[0].created_at.utcoffset() == timedelta(hours=8)
+
+
+def test_two_sqlite_instances_share_committed_state_and_reject_stale_writer(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "memory.sqlite3"
+    first_store = SqliteMemoryStore(path)
+    second_store = SqliteMemoryStore(path)
+    original = make_record()
+    first = first_store.apply(
+        MemoryChangeSet(USER_SCOPE, (AddMemory(original),)),
+        expected_revision=0,
+    )
+    stale = second_store.load(USER_SCOPE)
+    refreshed = refresh_record(original)
+    second = first_store.apply(
+        MemoryChangeSet(USER_SCOPE, (RefreshMemory(refreshed),)),
+        expected_revision=first.revision,
+    )
+
+    with pytest.raises(MemoryConflictError, match="expected 1, found 2"):
+        second_store.apply(
+            MemoryChangeSet(USER_SCOPE, (RefreshMemory(refreshed),)),
+            expected_revision=stale.revision,
+        )
+
+    assert second_store.load(USER_SCOPE) == second
+
+
+def test_two_sqlite_instances_have_exactly_one_concurrent_cas_winner(tmp_path: Path) -> None:
+    path = tmp_path / "memory.sqlite3"
+    stores = (SqliteMemoryStore(path), SqliteMemoryStore(path))
+    barrier = Barrier(2)
+
+    def write(item: tuple[SqliteMemoryStore, MemoryRecord]) -> object:
+        store, record = item
+        barrier.wait()
+        try:
+            return store.apply(
+                MemoryChangeSet(USER_SCOPE, (AddMemory(record),)),
+                expected_revision=0,
+            )
+        except MemoryConflictError as error:
+            return error
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = tuple(
+            executor.map(write, zip(stores, (make_record(), make_record("memory-2")), strict=True))
+        )
+
+    assert sum(isinstance(result, MemoryScopeSnapshot) for result in results) == 1
+    assert sum(isinstance(result, MemoryConflictError) for result in results) == 1
+    assert stores[0].load(USER_SCOPE).revision == 1
+    assert len(stores[1].load(USER_SCOPE).records) == 1
+
+
+def test_sqlite_load_reads_revision_and_records_from_one_transaction_snapshot(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "memory.sqlite3"
+    writer = SqliteMemoryStore(path)
+    original = make_record()
+    first = writer.apply(
+        MemoryChangeSet(USER_SCOPE, (AddMemory(original),)),
+        expected_revision=0,
+    )
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("PRAGMA journal_mode = WAL").fetchone() == ("wal",)
+
+    records_query_started = Event()
+    continue_read = Event()
+
+    class PausingSqliteMemoryStore(SqliteMemoryStore):
+        def _connect(self) -> sqlite3.Connection:
+            connection = super()._connect()
+
+            def pause_after_revision(statement: str) -> None:
+                if "SELECT * FROM memory_records" not in statement:
+                    return
+                records_query_started.set()
+                if not continue_read.wait(timeout=5):
+                    raise RuntimeError("timed out waiting to continue snapshot read")
+
+            connection.set_trace_callback(pause_after_revision)
+            return connection
+
+    reader = PausingSqliteMemoryStore(path)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        loaded_future = executor.submit(reader.load, USER_SCOPE)
+        assert records_query_started.wait(timeout=5)
+        refreshed = refresh_record(original)
+        second = writer.apply(
+            MemoryChangeSet(USER_SCOPE, (RefreshMemory(refreshed),)),
+            expected_revision=first.revision,
+        )
+        continue_read.set()
+        loaded = loaded_future.result(timeout=5)
+
+    assert loaded == first
+    assert reader.load(USER_SCOPE) == second
+
+
+def test_sqlite_forget_rolls_back_payload_delete_when_tombstone_insert_fails(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "memory.sqlite3"
+    store = SqliteMemoryStore(path)
+    original = make_record()
+    saved = store.apply(
+        MemoryChangeSet(USER_SCOPE, (AddMemory(original),)),
+        expected_revision=0,
+    )
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            """
+            CREATE TRIGGER reject_tombstone BEFORE INSERT ON memory_tombstones
+            BEGIN
+                SELECT RAISE(ABORT, 'injected tombstone failure');
+            END
+            """
+        )
+    tombstone = MemoryTombstone.from_record(
+        original,
+        forgotten_at=NOW,
+        reason=MemoryForgetReason.USER_REQUEST,
+    )
+
+    with pytest.raises(DQMemoryError, match="memory change violates database constraints"):
+        store.apply(
+            MemoryChangeSet(USER_SCOPE, (ForgetMemory(tombstone),)),
+            expected_revision=saved.revision,
+        )
+
+    assert store.load(USER_SCOPE) == saved
+
+
+def test_sqlite_forget_leaves_no_payload_or_provenance_in_public_tables(tmp_path: Path) -> None:
+    path = tmp_path / "memory.sqlite3"
+    store = SqliteMemoryStore(path)
+    original = make_record()
+    saved = store.apply(
+        MemoryChangeSet(USER_SCOPE, (AddMemory(original),)),
+        expected_revision=0,
+    )
+    tombstone = MemoryTombstone.from_record(
+        original,
+        forgotten_at=NOW,
+        reason=MemoryForgetReason.USER_REQUEST,
+    )
+
+    store.apply(
+        MemoryChangeSet(USER_SCOPE, (ForgetMemory(tombstone),)),
+        expected_revision=saved.revision,
+    )
+
+    with sqlite3.connect(path) as connection:
+        records = connection.execute("SELECT * FROM memory_records").fetchall()
+        tombstone_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(memory_tombstones)")
+        }
+    assert records == []
+    assert "content" not in tombstone_columns
+    assert "source_item_digest" not in tombstone_columns
+    assert "extractor_identity" not in tombstone_columns
+
+
+def test_sqlite_partial_unique_index_guards_active_topic_invariant(tmp_path: Path) -> None:
+    path = tmp_path / "memory.sqlite3"
+    store = SqliteMemoryStore(path)
+    store.apply(
+        MemoryChangeSet(USER_SCOPE, (AddMemory(make_record()),)),
+        expected_revision=0,
+    )
+
+    with sqlite3.connect(path) as connection, pytest.raises(sqlite3.IntegrityError):
+        connection.execute(
+            """
+            INSERT INTO memory_records
+            SELECT scope_kind, scope_id, ?, revision, kind, topic, content, confidence,
+                   sensitivity, source_type, source_item_digest, extractor_identity,
+                   extracted_at, source_id, source_revision, run_id, confirmation_digest,
+                   confirmed_at, status, valid_from, expires_at, supersedes_id, created_at,
+                   updated_at, schema_version
+            FROM memory_records WHERE memory_id = ?
+            """,
+            ("memory-2", "memory-1"),
+        )
+
+
+def test_sqlite_corrupt_row_raises_stable_memory_error_without_content(tmp_path: Path) -> None:
+    path = tmp_path / "memory.sqlite3"
+    store = SqliteMemoryStore(path)
+    original = make_record()
+    store.apply(
+        MemoryChangeSet(USER_SCOPE, (AddMemory(original),)),
+        expected_revision=0,
+    )
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "UPDATE memory_records SET status = ? WHERE memory_id = ?",
+            ("unknown-status", original.memory_id),
+        )
+
+    with pytest.raises(DQMemoryError, match="invalid scope data") as raised:
+        store.load(USER_SCOPE)
+
+    assert original.content not in str(raised.value)
+    assert str(path) not in str(raised.value)
+
+
+def test_sqlite_corrupt_schema_raises_stable_memory_error(tmp_path: Path) -> None:
+    path = tmp_path / "memory.sqlite3"
+    store = SqliteMemoryStore(path)
+    with sqlite3.connect(path) as connection:
+        connection.execute("ALTER TABLE memory_records RENAME COLUMN content TO payload")
+
+    with pytest.raises(DQMemoryError, match="cannot apply memory changes") as raised:
+        store.apply(
+            MemoryChangeSet(USER_SCOPE, (AddMemory(make_record()),)),
+            expected_revision=0,
+        )
+
+    assert str(path) not in str(raised.value)
+    assert make_record().content not in str(raised.value)
+
+
+def test_sqlite_initialization_error_does_not_expose_database_path(tmp_path: Path) -> None:
+    parent_file = tmp_path / "not-a-directory"
+    parent_file.write_text("occupied", encoding="utf-8")
+    path = parent_file / "memory.sqlite3"
+
+    with pytest.raises(DQMemoryError, match="cannot initialize memory database") as raised:
+        SqliteMemoryStore(path)
+
+    assert str(path) not in str(raised.value)
+    assert raised.value.__cause__ is None
+    assert str(path) not in "".join(traceback.format_exception(raised.value))
+
+
+def test_sqlite_adapter_rejects_connection_local_memory_database() -> None:
+    with pytest.raises(
+        MemoryValidationError,
+        match="must identify a durable filesystem database",
+    ):
+        SqliteMemoryStore(Path(":memory:"))

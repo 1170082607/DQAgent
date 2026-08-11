@@ -1,8 +1,13 @@
 """Transactional storage contract for policy-governed long-term memory."""
 
+import math
+import sqlite3
+from contextlib import closing
 from dataclasses import dataclass, fields
+from datetime import datetime
+from pathlib import Path
 from threading import Lock
-from typing import Protocol, TypeAlias
+from typing import Protocol, TypeAlias, cast
 
 from dqagent.errors import (
     MemoryConflictError,
@@ -10,12 +15,23 @@ from dqagent.errors import (
     MemoryNotFoundError,
     MemoryValidationError,
 )
+from dqagent.errors import MemoryError as DQMemoryError
 from dqagent.memory import (
+    MemoryConfidence,
+    MemoryConfirmation,
+    MemoryForgetReason,
+    MemoryKind,
     MemoryLifecycleStatus,
+    MemoryProvenance,
     MemoryRecord,
     MemoryScope,
+    MemoryScopeKind,
+    MemorySensitivity,
+    MemorySourceType,
     MemoryTombstone,
 )
+
+MEMORY_DATABASE_SCHEMA_VERSION = 1
 
 _LIFECYCLE_STABLE_FIELDS = tuple(
     field.name
@@ -132,16 +148,7 @@ class InMemoryMemoryStore:
         *,
         expected_revision: int,
     ) -> MemoryScopeSnapshot:
-        if not isinstance(change_set, MemoryChangeSet):
-            raise MemoryCorruptChangeError("memory store requires a MemoryChangeSet")
-        if (
-            isinstance(expected_revision, bool)
-            or not isinstance(expected_revision, int)
-            or expected_revision < 0
-        ):
-            raise MemoryCorruptChangeError(
-                "expected memory scope revision must be a non-negative integer"
-            )
+        _validate_apply_arguments(change_set, expected_revision)
 
         with self._lock:
             current = self._snapshots.get(
@@ -149,14 +156,480 @@ class InMemoryMemoryStore:
                 MemoryScopeSnapshot(change_set.scope),
             )
             if current.revision != expected_revision:
-                raise MemoryConflictError(
-                    "memory scope revision conflict for "
-                    f"'{change_set.scope.kind.value}:{change_set.scope.scope_id}': "
-                    f"expected {expected_revision}, found {current.revision}"
+                raise _revision_conflict(
+                    change_set.scope,
+                    expected_revision,
+                    current.revision,
                 )
             candidate = _apply_changes(current, change_set)
             self._snapshots[change_set.scope] = candidate
             return candidate
+
+
+class SqliteMemoryStore:
+    """SQLite-backed exact-scope store with cross-connection transactional CAS."""
+
+    def __init__(self, path: Path, *, timeout_seconds: float = 5.0) -> None:
+        if not isinstance(path, Path):
+            raise MemoryValidationError("memory database path must be a Path")
+        if path == Path(":memory:"):
+            raise MemoryValidationError(
+                "memory database path must identify a durable filesystem database"
+            )
+        if (
+            isinstance(timeout_seconds, bool)
+            or not isinstance(timeout_seconds, (int, float))
+            or not math.isfinite(timeout_seconds)
+            or timeout_seconds <= 0
+        ):
+            raise MemoryValidationError("memory database timeout must be greater than zero")
+        self._path = path
+        self._timeout_seconds = timeout_seconds
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            with closing(self._connect()) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                try:
+                    _initialize_sqlite_schema(connection)
+                    _verify_sqlite_schema(connection)
+                    connection.commit()
+                except BaseException:
+                    connection.rollback()
+                    raise
+        except DQMemoryError:
+            raise
+        except (OSError, sqlite3.DatabaseError):
+            raise DQMemoryError("cannot initialize memory database") from None
+
+    def load(self, scope: MemoryScope) -> MemoryScopeSnapshot:
+        if not isinstance(scope, MemoryScope):
+            raise MemoryValidationError("memory store scope must be a MemoryScope")
+        try:
+            with closing(self._connect()) as connection:
+                connection.execute("BEGIN")
+                try:
+                    _verify_sqlite_schema(connection)
+                    snapshot = _load_sqlite_snapshot(connection, scope)
+                    connection.commit()
+                    return snapshot
+                except BaseException:
+                    connection.rollback()
+                    raise
+        except DQMemoryError:
+            raise
+        except (sqlite3.DatabaseError, TypeError, ValueError) as error:
+            raise DQMemoryError("cannot load memory scope") from error
+
+    def apply(
+        self,
+        change_set: MemoryChangeSet,
+        *,
+        expected_revision: int,
+    ) -> MemoryScopeSnapshot:
+        _validate_apply_arguments(change_set, expected_revision)
+        try:
+            with closing(self._connect()) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                try:
+                    _verify_sqlite_schema(connection)
+                    connection.execute(
+                        """
+                        INSERT OR IGNORE INTO memory_scopes(scope_kind, scope_id, revision)
+                        VALUES (?, ?, 0)
+                        """,
+                        (change_set.scope.kind.value, change_set.scope.scope_id),
+                    )
+                    current = _load_sqlite_snapshot(connection, change_set.scope)
+                    if current.revision != expected_revision:
+                        raise _revision_conflict(
+                            change_set.scope,
+                            expected_revision,
+                            current.revision,
+                        )
+                    candidate = _apply_changes(current, change_set)
+                    _write_sqlite_snapshot(
+                        connection,
+                        candidate,
+                        expected_revision=expected_revision,
+                    )
+                    connection.commit()
+                    return candidate
+                except BaseException:
+                    connection.rollback()
+                    raise
+        except (MemoryConflictError, MemoryCorruptChangeError, MemoryNotFoundError):
+            raise
+        except sqlite3.IntegrityError as error:
+            raise MemoryCorruptChangeError(
+                "memory change violates database constraints"
+            ) from error
+        except DQMemoryError:
+            raise
+        except (sqlite3.DatabaseError, TypeError, ValueError) as error:
+            raise DQMemoryError("cannot apply memory changes") from error
+
+    def _connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(
+            self._path,
+            timeout=self._timeout_seconds,
+            isolation_level=None,
+        )
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("PRAGMA secure_delete = ON")
+        return connection
+
+
+def _initialize_sqlite_schema(connection: sqlite3.Connection) -> None:
+    statements = (
+        """
+        CREATE TABLE IF NOT EXISTS memory_metadata (
+            key TEXT PRIMARY KEY,
+            value INTEGER NOT NULL
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS memory_scopes (
+            scope_kind TEXT NOT NULL,
+            scope_id TEXT NOT NULL,
+            revision INTEGER NOT NULL CHECK (revision >= 0),
+            PRIMARY KEY (scope_kind, scope_id)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS memory_records (
+            scope_kind TEXT NOT NULL,
+            scope_id TEXT NOT NULL,
+            memory_id TEXT NOT NULL,
+            revision INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            topic TEXT NOT NULL,
+            content TEXT NOT NULL,
+            confidence REAL NOT NULL,
+            sensitivity TEXT NOT NULL,
+            source_type TEXT NOT NULL,
+            source_item_digest TEXT NOT NULL,
+            extractor_identity TEXT NOT NULL,
+            extracted_at TEXT NOT NULL,
+            source_id TEXT,
+            source_revision INTEGER,
+            run_id TEXT,
+            confirmation_digest TEXT NOT NULL,
+            confirmed_at TEXT NOT NULL,
+            status TEXT NOT NULL,
+            valid_from TEXT NOT NULL,
+            expires_at TEXT,
+            supersedes_id TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            schema_version INTEGER NOT NULL,
+            PRIMARY KEY (scope_kind, scope_id, memory_id),
+            FOREIGN KEY (scope_kind, scope_id)
+                REFERENCES memory_scopes(scope_kind, scope_id) ON DELETE CASCADE
+        )
+        """,
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS memory_one_active_topic
+        ON memory_records(scope_kind, scope_id, kind, topic)
+        WHERE status = 'active'
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS memory_tombstones (
+            scope_kind TEXT NOT NULL,
+            scope_id TEXT NOT NULL,
+            memory_id TEXT NOT NULL,
+            revision INTEGER NOT NULL,
+            forgotten_at TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            schema_version INTEGER NOT NULL,
+            PRIMARY KEY (scope_kind, scope_id, memory_id),
+            FOREIGN KEY (scope_kind, scope_id)
+                REFERENCES memory_scopes(scope_kind, scope_id) ON DELETE CASCADE
+        )
+        """,
+    )
+    for statement in statements:
+        connection.execute(statement)
+    connection.execute(
+        "INSERT OR IGNORE INTO memory_metadata(key, value) VALUES (?, ?)",
+        ("schema_version", MEMORY_DATABASE_SCHEMA_VERSION),
+    )
+
+
+def _verify_sqlite_schema(connection: sqlite3.Connection) -> None:
+    row = connection.execute(
+        "SELECT value FROM memory_metadata WHERE key = ?",
+        ("schema_version",),
+    ).fetchone()
+    if row is None or row["value"] != MEMORY_DATABASE_SCHEMA_VERSION:
+        raise DQMemoryError("unsupported memory database schema version")
+
+
+def _load_sqlite_snapshot(
+    connection: sqlite3.Connection,
+    scope: MemoryScope,
+) -> MemoryScopeSnapshot:
+    parameters = (scope.kind.value, scope.scope_id)
+    revision_row = connection.execute(
+        """
+        SELECT revision FROM memory_scopes
+        WHERE scope_kind = ? AND scope_id = ?
+        """,
+        parameters,
+    ).fetchone()
+    if revision_row is None:
+        return MemoryScopeSnapshot(scope)
+    try:
+        revision = _required_int(revision_row, "revision")
+        record_rows = connection.execute(
+            """
+            SELECT * FROM memory_records
+            WHERE scope_kind = ? AND scope_id = ?
+            ORDER BY memory_id
+            """,
+            parameters,
+        ).fetchall()
+        tombstone_rows = connection.execute(
+            """
+            SELECT * FROM memory_tombstones
+            WHERE scope_kind = ? AND scope_id = ?
+            ORDER BY memory_id
+            """,
+            parameters,
+        ).fetchall()
+        return MemoryScopeSnapshot(
+            scope=scope,
+            revision=revision,
+            records=tuple(_record_from_sqlite_row(row) for row in record_rows),
+            tombstones=tuple(_tombstone_from_sqlite_row(row) for row in tombstone_rows),
+        )
+    except (KeyError, TypeError, ValueError, MemoryValidationError) as error:
+        raise DQMemoryError("memory database contains invalid scope data") from error
+
+
+def _write_sqlite_snapshot(
+    connection: sqlite3.Connection,
+    snapshot: MemoryScopeSnapshot,
+    *,
+    expected_revision: int,
+) -> None:
+    scope_parameters = (snapshot.scope.kind.value, snapshot.scope.scope_id)
+    cursor = connection.execute(
+        """
+        UPDATE memory_scopes SET revision = ?
+        WHERE scope_kind = ? AND scope_id = ? AND revision = ?
+        """,
+        (snapshot.revision, *scope_parameters, expected_revision),
+    )
+    if cursor.rowcount != 1:
+        row = connection.execute(
+            """
+            SELECT revision FROM memory_scopes
+            WHERE scope_kind = ? AND scope_id = ?
+            """,
+            scope_parameters,
+        ).fetchone()
+        actual_revision = _required_int(row, "revision") if row is not None else 0
+        raise _revision_conflict(snapshot.scope, expected_revision, actual_revision)
+
+    connection.execute(
+        "DELETE FROM memory_records WHERE scope_kind = ? AND scope_id = ?",
+        scope_parameters,
+    )
+    connection.execute(
+        "DELETE FROM memory_tombstones WHERE scope_kind = ? AND scope_id = ?",
+        scope_parameters,
+    )
+    connection.executemany(
+        """
+        INSERT INTO memory_records(
+            scope_kind, scope_id, memory_id, revision, kind, topic, content,
+            confidence, sensitivity, source_type, source_item_digest,
+            extractor_identity, extracted_at, source_id, source_revision, run_id,
+            confirmation_digest, confirmed_at, status, valid_from, expires_at,
+            supersedes_id, created_at, updated_at, schema_version
+        ) VALUES (
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        )
+        """,
+        (_record_to_sqlite_values(record) for record in snapshot.records),
+    )
+    connection.executemany(
+        """
+        INSERT INTO memory_tombstones(
+            scope_kind, scope_id, memory_id, revision, forgotten_at, reason, schema_version
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (_tombstone_to_sqlite_values(tombstone) for tombstone in snapshot.tombstones),
+    )
+
+
+def _record_to_sqlite_values(record: MemoryRecord) -> tuple[object, ...]:
+    provenance = record.provenance
+    return (
+        record.scope.kind.value,
+        record.scope.scope_id,
+        record.memory_id,
+        record.revision,
+        record.kind.value,
+        record.topic,
+        record.content,
+        record.confidence.value,
+        record.sensitivity.value,
+        provenance.source_type.value,
+        provenance.source_item_digest,
+        provenance.extractor_identity,
+        provenance.extracted_at.isoformat(),
+        provenance.source_id,
+        provenance.source_revision,
+        provenance.run_id,
+        record.confirmation.candidate_digest,
+        record.confirmation.confirmed_at.isoformat(),
+        record.status.value,
+        record.valid_from.isoformat(),
+        record.expires_at.isoformat() if record.expires_at is not None else None,
+        record.supersedes_id,
+        record.created_at.isoformat(),
+        record.updated_at.isoformat(),
+        record.schema_version,
+    )
+
+
+def _tombstone_to_sqlite_values(tombstone: MemoryTombstone) -> tuple[object, ...]:
+    return (
+        tombstone.scope.kind.value,
+        tombstone.scope.scope_id,
+        tombstone.memory_id,
+        tombstone.revision,
+        tombstone.forgotten_at.isoformat(),
+        tombstone.reason.value,
+        tombstone.schema_version,
+    )
+
+
+def _record_from_sqlite_row(row: sqlite3.Row) -> MemoryRecord:
+    scope = MemoryScope(
+        MemoryScopeKind(_required_str(row, "scope_kind")),
+        _required_str(row, "scope_id"),
+    )
+    provenance = MemoryProvenance(
+        source_type=MemorySourceType(_required_str(row, "source_type")),
+        source_item_digest=_required_str(row, "source_item_digest"),
+        extractor_identity=_required_str(row, "extractor_identity"),
+        extracted_at=_required_datetime(row, "extracted_at"),
+        source_id=_optional_str(row, "source_id"),
+        source_revision=_optional_int(row, "source_revision"),
+        run_id=_optional_str(row, "run_id"),
+    )
+    return MemoryRecord(
+        memory_id=_required_str(row, "memory_id"),
+        revision=_required_int(row, "revision"),
+        scope=scope,
+        kind=MemoryKind(_required_str(row, "kind")),
+        topic=_required_str(row, "topic"),
+        content=_required_str(row, "content"),
+        confidence=MemoryConfidence(_required_float(row, "confidence")),
+        sensitivity=MemorySensitivity(_required_str(row, "sensitivity")),
+        provenance=provenance,
+        confirmation=MemoryConfirmation(
+            _required_str(row, "confirmation_digest"),
+            _required_datetime(row, "confirmed_at"),
+        ),
+        status=MemoryLifecycleStatus(_required_str(row, "status")),
+        valid_from=_required_datetime(row, "valid_from"),
+        expires_at=_optional_datetime(row, "expires_at"),
+        supersedes_id=_optional_str(row, "supersedes_id"),
+        created_at=_required_datetime(row, "created_at"),
+        updated_at=_required_datetime(row, "updated_at"),
+        schema_version=_required_int(row, "schema_version"),
+    )
+
+
+def _tombstone_from_sqlite_row(row: sqlite3.Row) -> MemoryTombstone:
+    return MemoryTombstone(
+        memory_id=_required_str(row, "memory_id"),
+        revision=_required_int(row, "revision"),
+        scope=MemoryScope(
+            MemoryScopeKind(_required_str(row, "scope_kind")),
+            _required_str(row, "scope_id"),
+        ),
+        forgotten_at=_required_datetime(row, "forgotten_at"),
+        reason=MemoryForgetReason(_required_str(row, "reason")),
+        schema_version=_required_int(row, "schema_version"),
+    )
+
+
+def _required_str(row: sqlite3.Row, name: str) -> str:
+    value = row[name]
+    if not isinstance(value, str):
+        raise TypeError(f"{name} must be text")
+    return value
+
+
+def _optional_str(row: sqlite3.Row, name: str) -> str | None:
+    value = row[name]
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise TypeError(f"{name} must be text or null")
+    return value
+
+
+def _required_int(row: sqlite3.Row, name: str) -> int:
+    value = row[name]
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{name} must be an integer")
+    return cast(int, value)
+
+
+def _optional_int(row: sqlite3.Row, name: str) -> int | None:
+    value = row[name]
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{name} must be an integer or null")
+    return cast(int, value)
+
+
+def _required_float(row: sqlite3.Row, name: str) -> float:
+    value = row[name]
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"{name} must be a number")
+    return float(value)
+
+
+def _required_datetime(row: sqlite3.Row, name: str) -> datetime:
+    return datetime.fromisoformat(_required_str(row, name))
+
+
+def _optional_datetime(row: sqlite3.Row, name: str) -> datetime | None:
+    value = _optional_str(row, name)
+    return datetime.fromisoformat(value) if value is not None else None
+
+
+def _validate_apply_arguments(change_set: object, expected_revision: object) -> None:
+    if not isinstance(change_set, MemoryChangeSet):
+        raise MemoryCorruptChangeError("memory store requires a MemoryChangeSet")
+    if (
+        isinstance(expected_revision, bool)
+        or not isinstance(expected_revision, int)
+        or expected_revision < 0
+    ):
+        raise MemoryCorruptChangeError(
+            "expected memory scope revision must be a non-negative integer"
+        )
+
+
+def _revision_conflict(
+    scope: MemoryScope,
+    expected_revision: int,
+    actual_revision: int,
+) -> MemoryConflictError:
+    return MemoryConflictError(
+        "memory scope revision conflict for "
+        f"'{scope.kind.value}:{scope.scope_id}': "
+        f"expected {expected_revision}, found {actual_revision}"
+    )
 
 
 def _apply_changes(

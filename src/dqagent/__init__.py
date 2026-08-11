@@ -41,6 +41,7 @@ from dqagent.memory_store import (
     MemoryScopeSnapshot,
     MemoryStore,
     RefreshMemory,
+    SqliteMemoryStore,
     SupersedeMemory,
 )
 from dqagent.models import Message, Role, TokenUsage
@@ -166,5 +167,6 @@ __all__ = [
     "MemoryScopeSnapshot",
     "MemoryStore",
     "RefreshMemory",
+    "SqliteMemoryStore",
     "SupersedeMemory",
 ]
