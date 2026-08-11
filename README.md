@@ -74,13 +74,19 @@ retrieval boundaries, citation provenance, and independent retrieval evaluation.
 - Retrieval start, completion, and failure events with a committed `Recall@k`/MRR/no-result suite.
 - A separate live answer-level RAG suite for lexical claim/citation linkage, insufficient evidence,
   and adversarial retrieved instructions.
+- Phase 8 memory domain values, deterministic admission policy, and transactional in-memory/SQLite
+  memory stores.
+- A model-free `MemoryService` with transient proposal/preview, exact digest confirmation, list/show,
+  atomic correction, forgetting tombstones, expiry materialization, and fail-closed errors.
+- Content-free memory operation metadata for event-ready audit attributes; memory content remains in
+  explicit result payloads only.
 - Environment-based configuration with explicit validation.
 - Unit tests, Ruff linting, mypy strict type checking, and GitHub Actions CI.
 
-Streaming, cross-session memory, hard execution isolation, approval policy, distributed
-session/workflow leases, durable telemetry delivery, LLM-as-judge, and repeated live-model sampling
-remain deferred. Evaluation, security, durability, and observability remain continuous constraints
-for later phases.
+Memory ranking, recall/context and chat integration, model-assisted extraction, streaming, hard
+execution isolation, approval policy, distributed session/workflow leases, durable telemetry delivery,
+LLM-as-judge, and repeated live-model sampling remain deferred. Evaluation, security, durability, and
+observability remain continuous constraints for later phases.
 
 ## Installation
 
@@ -260,6 +266,10 @@ src/dqagent/session.py Durable transcript model and session stores
 src/dqagent/context_evaluation.py Deterministic context regression runner
 src/dqagent/retrieval.py Ingestion, embedding, local index, retrieval, and provenance
 src/dqagent/retrieval_evaluation.py Recall-oriented retrieval regression runner
+src/dqagent/memory.py Domain values and policy contracts for selected memory
+src/dqagent/memory_consolidation.py Store-neutral deterministic consolidation
+src/dqagent/memory_service.py Explicit memory management application service
+src/dqagent/memory_store.py Exact-scope transactional memory stores
 src/dqagent/workflow.py Deterministic workflow definition and runner
 src/dqagent/checkpoint.py Workflow checkpoint contract and stores
 evaluations/        Versioned cases and committed baseline reports

@@ -204,7 +204,7 @@ embedding provider and scalable vector store require a concrete corpus and a new
 
 ### Phase 8: Long-Term Memory
 
-**Status:** Planned
+**Status:** In progress
 
 **Outcome:** Retain useful experience across sessions without turning the transcript into memory.
 
@@ -216,6 +216,18 @@ embedding provider and scalable vector store require a concrete corpus and a new
 
 Memory is selected state with policy. Saving every message or embedding the full transcript does not
 meet this phase's objective.
+
+**T5 delivered:**
+
+- [x] Add a model-free `MemoryService` for transient proposal, exact confirmation, inspection,
+  correction, and forgetting use cases.
+- [x] Keep deterministic consolidation outside storage: duplicates refresh, while active topic
+  conflicts require explicit correction.
+- [x] Validate scope, candidate digest, policy, and clock again at confirmation time, with
+  optimistic-concurrency and content-free operation metadata.
+
+Memory ranking, recall/context integration, chat integration, and model-assisted extraction remain
+later Phase 8 work.
 
 ### Phase 9: Coding Agent Harness and Safety
 

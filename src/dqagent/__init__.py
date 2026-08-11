@@ -32,6 +32,29 @@ from dqagent.context import (
 from dqagent.events import RunEvent, RunEventType, RunState
 from dqagent.execution import RunContext
 from dqagent.lifecycle import CoordinatedRun, RunCoordinator, RunRecord, RunScope
+from dqagent.memory_consolidation import (
+    ConsolidationAction,
+    ConsolidationReason,
+    MemoryConsolidationDecision,
+    MemoryConsolidator,
+    consolidate_memory,
+)
+from dqagent.memory_service import (
+    MemoryConfirmationResult,
+    MemoryConfirmResult,
+    MemoryCorrectionResult,
+    MemoryEventMetadata,
+    MemoryForgetResult,
+    MemoryListResult,
+    MemoryOperation,
+    MemoryOperationMetadata,
+    MemoryOutcome,
+    MemoryPreview,
+    MemoryProposal,
+    MemoryService,
+    MemoryShowResult,
+    MemoryWriteOutcome,
+)
 from dqagent.memory_store import (
     AddMemory,
     ExpireMemory,
@@ -169,4 +192,23 @@ __all__ = [
     "RefreshMemory",
     "SqliteMemoryStore",
     "SupersedeMemory",
+    "ConsolidationAction",
+    "ConsolidationReason",
+    "MemoryConsolidationDecision",
+    "MemoryConsolidator",
+    "consolidate_memory",
+    "MemoryConfirmResult",
+    "MemoryConfirmationResult",
+    "MemoryCorrectionResult",
+    "MemoryEventMetadata",
+    "MemoryForgetResult",
+    "MemoryListResult",
+    "MemoryOperation",
+    "MemoryOperationMetadata",
+    "MemoryOutcome",
+    "MemoryPreview",
+    "MemoryProposal",
+    "MemoryService",
+    "MemoryShowResult",
+    "MemoryWriteOutcome",
 ]

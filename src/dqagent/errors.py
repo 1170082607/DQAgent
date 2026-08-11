@@ -1,6 +1,9 @@
 """Stable error taxonomy exposed by DQAgent."""
 
+from collections.abc import Mapping
 from enum import StrEnum
+from types import MappingProxyType
+from typing import Protocol
 
 
 class ErrorCategory(StrEnum):
@@ -150,3 +153,182 @@ class MemoryCorruptChangeError(MemoryError):
     """Raised when a memory change set violates the transactional store contract."""
 
     category = ErrorCategory.CONFIGURATION
+
+
+class _MemoryServiceMetadataOwner(Protocol):
+    operation: str
+    scope_kind: str
+    scope_id: str
+    memory_id: str | None
+    candidate_digest: str | None
+    reason: str | None
+    metadata: Mapping[str, object]
+
+
+def _set_memory_service_metadata(
+    error: _MemoryServiceMetadataOwner,
+    *,
+    operation: str,
+    scope_kind: str,
+    scope_id: str,
+    memory_id: str | None,
+    candidate_digest: str | None,
+    reason: str | None,
+) -> None:
+    """Attach content-free fields suitable for logs and lifecycle events."""
+
+    error.operation = operation
+    error.scope_kind = scope_kind
+    error.scope_id = scope_id
+    error.memory_id = memory_id
+    error.candidate_digest = candidate_digest
+    error.reason = reason
+    error.metadata = MappingProxyType(
+        {
+            "operation": operation,
+            "scope_kind": scope_kind,
+            "scope_id": scope_id,
+            "memory_id": memory_id,
+            "candidate_digest": candidate_digest,
+            "reason": reason,
+        }
+    )
+
+
+class MemoryServiceError(MemoryError):
+    """Base error for explicit memory management operations."""
+
+    operation: str
+    scope_kind: str
+    scope_id: str
+    memory_id: str | None
+    candidate_digest: str | None
+    reason: str | None
+    metadata: Mapping[str, object]
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        operation: str,
+        scope_kind: str,
+        scope_id: str,
+        memory_id: str | None = None,
+        candidate_digest: str | None = None,
+        reason: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        _set_memory_service_metadata(
+            self,
+            operation=operation,
+            scope_kind=scope_kind,
+            scope_id=scope_id,
+            memory_id=memory_id,
+            candidate_digest=candidate_digest,
+            reason=reason,
+        )
+
+    @property
+    def event_attributes(self) -> Mapping[str, object]:
+        return self.metadata
+
+
+class MemoryDependencyError(MemoryServiceError):
+    """Raised when a policy, clock, or store dependency fails unexpectedly."""
+
+
+class MemoryAdmissionDeniedError(MemoryServiceError):
+    """Raised when policy denies a candidate during a write operation."""
+
+
+class MemoryDigestMismatchError(MemoryServiceError):
+    """Raised when the candidate submitted for confirmation is not digest-identical."""
+
+
+class MemoryServiceConflictError(MemoryConflictError):
+    """A service-level conflict with content-free operation metadata."""
+
+    operation: str
+    scope_kind: str
+    scope_id: str
+    memory_id: str | None
+    candidate_digest: str | None
+    reason: str | None
+    metadata: Mapping[str, object]
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        operation: str,
+        scope_kind: str,
+        scope_id: str,
+        memory_id: str | None = None,
+        candidate_digest: str | None = None,
+        reason: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        _set_memory_service_metadata(
+            self,
+            operation=operation,
+            scope_kind=scope_kind,
+            scope_id=scope_id,
+            memory_id=memory_id,
+            candidate_digest=candidate_digest,
+            reason=reason,
+        )
+
+    @property
+    def event_attributes(self) -> Mapping[str, object]:
+        return self.metadata
+
+
+class MemoryTopicConflictError(MemoryServiceConflictError):
+    """Raised when a candidate conflicts with an active proposition topic."""
+
+
+class MemoryTargetStateError(MemoryServiceConflictError):
+    """Raised when an explicit target is not in a state for the requested mutation."""
+
+
+class MemoryServiceNotFoundError(MemoryNotFoundError):
+    """A service lookup failure with content-free operation metadata."""
+
+    operation: str
+    scope_kind: str
+    scope_id: str
+    memory_id: str | None
+    candidate_digest: str | None
+    reason: str | None
+    metadata: Mapping[str, object]
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        operation: str,
+        scope_kind: str,
+        scope_id: str,
+        memory_id: str | None = None,
+        candidate_digest: str | None = None,
+        reason: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        _set_memory_service_metadata(
+            self,
+            operation=operation,
+            scope_kind=scope_kind,
+            scope_id=scope_id,
+            memory_id=memory_id,
+            candidate_digest=candidate_digest,
+            reason=reason,
+        )
+
+    @property
+    def event_attributes(self) -> Mapping[str, object]:
+        return self.metadata
+
+
+# Descriptive aliases keep the public vocabulary stable for callers that use either term.
+MemoryPolicyDeniedError = MemoryAdmissionDeniedError
+MemoryCandidateDigestMismatchError = MemoryDigestMismatchError

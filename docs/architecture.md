@@ -2,8 +2,10 @@
 
 ## Status
 
-This document describes the implemented Phase 7 architecture. Long-term memory, hard execution
-isolation, and other future capabilities remain in the [roadmap](roadmap.md).
+This document describes the implemented Phase 8 T5 architecture. Memory management is available as
+a model-free explicit application service; memory recall/ranking, context integration, chat
+integration, model-assisted extraction, hard execution isolation, and other future capabilities
+remain in the [roadmap](roadmap.md).
 
 ## System Context
 
@@ -37,6 +39,8 @@ Session ID -> SessionAgentApplication -> RunCoordinator -> Retriever
                        +-> SessionStore (full transcript + CAS revision after run success)
 
 Context case -> ContextEvaluationRunner -> production ContextBuilder -> context report
+
+Memory management request -> MemoryService -> MemoryPolicy + MemoryConsolidator + MemoryStore
 ```
 
 The CLI is the composition root. It creates the provider adapter, built-in tool registry, retry
@@ -98,6 +102,24 @@ persistence but does not execute nodes or infer retry safety.
 
 `ContextEvaluationRunner` measures the production context projection directly. It does not generate
 answers or implement an alternate context algorithm.
+
+`MemoryService` owns the explicit memory-management use cases. `propose`/`preview` evaluates a
+transient candidate and never creates a pending queue. `confirm` receives the exact candidate and
+digest again, obtains one fresh clock value, re-runs admission policy, and commits only through the
+store's exact-scope revision CAS. `list` and `show` are inspection operations that materialize due
+expiry into the record lifecycle. `correct` requires an explicit target ID and commits a superseded
+old record plus a new record in one store change set. `forget` requires the exact scope and ID and
+leaves only a content-free tombstone.
+
+`MemoryConsolidator` compares immutable scope data without importing or calling a store. It treats
+the same kind/topic/content proposition as an exact duplicate that may refresh provenance and
+expiry; a different content under an active kind/topic is a conflict. The service, rather than the
+store, invokes this decision and maps it to add/refresh or an explicit correction requirement.
+
+Memory result objects may contain records because they are the application payload returned to the
+caller. Their `MemoryEventMetadata`, and the metadata attached to service errors, contain only
+operation, outcome/reason, scope, revision, IDs, counts, and candidate digests. They never copy
+memory content into event-ready or error metadata.
 
 This split is similar to an application service invoking work inside a transaction coordinator while
 delegating one stage to an execution engine. The analogy is incomplete because the lifecycle provides
@@ -435,6 +457,7 @@ DocumentIngestor -> DocumentChunker + EmbeddingProvider + VectorStore
 VectorRetriever -> EmbeddingProvider + VectorStore
 SessionAgentApplication -> RunCoordinator + Retriever + ContextBuilder + SessionStore + AgentRuntime
 RetrievalEvaluationRunner -> DocumentIngestor + VectorRetriever
+MemoryService -> MemoryPolicy + MemoryConsolidator + MemoryStore
 ```
 
 - Session state is owned above the runtime; one run cannot commit partial history.
@@ -447,7 +470,10 @@ RetrievalEvaluationRunner -> DocumentIngestor + VectorRetriever
 - Workflow nodes depend on shared execution contracts, not provider SDKs or CLI state.
 - Checkpoint stores persist scheduler state but do not own workflow transitions or external effects.
 - Retrieval content is request-scoped external data, not durable session state or long-term memory.
-- Memory and multi-agent modules are not introduced before their phases.
+- MemoryService owns memory policy/consolidation orchestration; MemoryStore only loads exact scopes
+  and applies validated change sets. The store has no remember/retrieve/sensitivity policy.
+- Memory candidates are transient; there is no persistent pending-candidate queue. Memory is not
+  connected to the model, retrieval ranking, active context, or chat orchestration in T5.
 
 ## Configuration
 
@@ -478,6 +504,9 @@ the runtime's model-attempt budget and defaults to three. All values are validat
   pairing, structural/model summary provenance, overflow errors, and deterministic context reports.
 - Retrieval tests assert exact offsets, update/delete behavior, duplicate folding, embedding identity,
   atomic JSON persistence, empty retrieval, citation propagation, prompt isolation, and ranking reports.
+- Memory service tests assert transient proposals, policy rejection, digest and clock revalidation,
+  exact-scope operations, duplicate refresh, topic conflict, CAS concurrency, expiry, atomic
+  correction/forgetting, content-free metadata, and an SQLite integration smoke path.
 - CI runs Ruff, strict mypy, and pytest with at least 85% coverage.
 - CI also runs the credential-free deterministic behavioral suite after implementation tests.
 
@@ -496,7 +525,8 @@ nondeterminism make it an unsuitable correctness gate.
   distributed lease, append-only history, migration framework, tenant isolation, or retention policy.
 - Context budgets estimate characters rather than provider tokens. Structural and model summaries
   are lossy, and model summarization adds a provider call before the main agent run.
-- There is no approval policy or cross-session long-term memory.
+- Memory management is explicit and cross-session through its service/stores, but there is no memory
+  ranking, recall/context projection, chat integration, or model-assisted extraction yet.
 - The retrieval store is small, synchronous, single-process, and brute-force. Hashing embeddings are
   lexical, exact digest deduplication misses near-duplicates, and answer checks use explicit lexical
   claims rather than a semantic or LLM-based judge.
@@ -525,3 +555,4 @@ nondeterminism make it an unsuitable correctness gate.
 - [Phase 5 LangGraph and EINO Workflow Comparison](learning/phase-5-langgraph-eino-workflow-comparison.md)
 - [Phase 6 Session and Context Comparison](learning/phase-6-session-context-comparison.md)
 - [Phase 7 Retrieval Framework Comparison](learning/phase-7-retrieval-framework-comparison.md)
+- [ADR-0009: Policy-Governed Long-Term Memory](adr/0009-policy-governed-long-term-memory.md)

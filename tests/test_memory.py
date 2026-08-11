@@ -278,6 +278,31 @@ def test_record_requires_exact_confirmation_and_has_no_pending_state() -> None:
         replace(make_record(), memory_id=" ")
 
 
+def test_first_revision_cannot_be_created_before_confirmation() -> None:
+    candidate = make_candidate()
+    confirmed_at = NOW + timedelta(minutes=1)
+
+    with pytest.raises(MemoryValidationError, match="creation cannot precede confirmation"):
+        MemoryRecord.from_candidate(
+            candidate,
+            memory_id="memory-1",
+            revision=1,
+            confirmation=MemoryConfirmation(candidate.digest, confirmed_at),
+            created_at=NOW,
+            updated_at=NOW + timedelta(minutes=2),
+        )
+
+    refreshed = MemoryRecord.from_candidate(
+        candidate,
+        memory_id="memory-1",
+        revision=2,
+        confirmation=MemoryConfirmation(candidate.digest, confirmed_at),
+        created_at=NOW,
+        updated_at=NOW + timedelta(minutes=2),
+    )
+    assert refreshed.revision == 2
+
+
 def test_record_rejects_payload_changed_after_confirmation() -> None:
     with pytest.raises(MemoryValidationError, match="does not match"):
         replace(make_record(), content="Different content")

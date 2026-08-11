@@ -238,8 +238,10 @@ class MemoryRecord:
             raise MemoryValidationError("memory creation timestamp must not follow its update")
         if self.provenance.extracted_at > self.confirmation.confirmed_at:
             raise MemoryValidationError("memory confirmation cannot precede extraction")
-        if self.confirmation.confirmed_at > self.created_at:
+        if self.revision == 1 and self.confirmation.confirmed_at > self.created_at:
             raise MemoryValidationError("memory creation cannot precede confirmation")
+        if self.confirmation.confirmed_at > self.updated_at:
+            raise MemoryValidationError("memory confirmation cannot follow its latest update")
         if self.confirmation.candidate_digest != self._candidate_digest():
             raise MemoryValidationError("memory confirmation digest does not match the record")
         if self.status is MemoryLifecycleStatus.EXPIRED and (
