@@ -2,10 +2,10 @@
 
 ## Status
 
-This document describes the implemented Phase 8 T7 architecture. Memory management is available as
-a model-free explicit application service, request-time policy-filtered recall, and an independent
-`dqagent-memory` CLI; context integration, chat integration, model-assisted extraction, hard
-execution isolation, and other future capabilities remain in the [roadmap](roadmap.md).
+This document describes the implemented Phase 8 T8 architecture. Memory management is available as
+a model-free explicit application service, request-time policy-filtered recall, a bounded context
+projection, and an independent `dqagent-memory` CLI; chat integration, model-assisted extraction,
+hard execution isolation, and other future capabilities remain in the [roadmap](roadmap.md).
 
 ## System Context
 
@@ -47,6 +47,8 @@ Memory management request -> dqagent-memory CLI -> MemoryService
 MemoryRecallRequest -> MemoryService -> exact-scope MemoryStore + MemoryPolicy
                                       +-> MemorySelector -> EmbeddingProvider
                                       +-> MemoryRecall (selected/omitted matches)
+
+MemoryRecall -> ContextBuilder -> lower-authority memory projection
 ```
 
 The main CLI is the composition root for model-backed chat. The independent `dqagent-memory` CLI is
@@ -78,8 +80,9 @@ appends only the current user message and new model/tool items through compare-a
 success. `SessionStore` owns serialization and revision checks; it does not select model context.
 
 `PromptAssembler` owns named system sections and explicitly requested project knowledge.
-`ContextBuilder` owns budget estimation, complete-turn selection, compaction, and summary provenance.
-Neither component mutates the durable transcript.
+`ContextBuilder` owns budget estimation, complete-turn selection, compaction, summary provenance,
+and the transient projection of an already-selected `MemoryRecall`. It does not query memory
+storage, apply memory eligibility or ranking policy, or mutate the durable transcript.
 
 `RunCoordinator` owns one end-to-end run across application and runtime stages. It controls the
 single start and terminal transitions, error-to-run binding, ordered event stream, and default timeout.
@@ -405,6 +408,16 @@ history by trimming, and explicit whole-turn loss under a deliberately small str
 The loss case passes only when the omitted structural-turn count is observable; compaction remains
 lossy but no longer creates partial semantic records.
 
+When a `MemoryRecall` is supplied, the builder inserts selected records as one separately delimited
+`USER` data block marked `untrusted_data=true` and `authority=lower-authority`. The current request,
+mandatory prompt sections, retrieved RAG passages, and required recent turns stay ahead of older
+transcript content; the current request is rendered after memory so an explicit correction has the
+latest user authority. Memory has its own character cap, records are admitted atomically, and only
+the remaining context budget is available to older turns or summaries. Memory content is excluded
+from system messages, summaries, RAG passages, and durable session transcripts. `ContextWindow`
+returns content-free projection evidence and `CONTEXT_ASSEMBLED` adds only memory IDs, kinds,
+counts, scores, selector identity, and budget metrics to its event attributes.
+
 ## Retrieval-Augmented Generation
 
 `SourceDocument` defines an external source revision through document identity, content, citation
@@ -481,7 +494,7 @@ WorkflowRunner -> WorkflowDefinition + CheckpointStore + RunContext + RunEvent
 JSON checkpoint store -> WorkflowCheckpoint + local filesystem
 ContextBuilder -> PromptAssembler + optional ConversationSummarizer + neutral models
 JSON session store -> SessionSnapshot + local filesystem
-ContextBuilder + SessionSnapshot -> transcript validator + neutral models
+ContextBuilder + SessionSnapshot -> transcript validator + MemoryRecall + neutral models
 ContextEvaluationRunner -> ContextBuilder + neutral models
 DocumentIngestor -> DocumentChunker + EmbeddingProvider + VectorStore
 VectorRetriever -> EmbeddingProvider + VectorStore
@@ -504,7 +517,8 @@ MemorySelector -> EmbeddingProvider
 - MemoryService owns memory policy/consolidation orchestration; MemoryStore only loads exact scopes
   and applies validated change sets. The store has no remember/retrieve/sensitivity policy.
 - Memory candidates are transient; there is no persistent pending-candidate queue. Recall is not
-  connected to the model, retrieval ranking, active context, or chat orchestration in T7.
+  connected to retrieval ranking or chat orchestration. ContextBuilder accepts only the completed
+  `MemoryRecall` projection and does not perform store access, eligibility, or ranking.
 
 ## Configuration
 
@@ -532,7 +546,9 @@ the runtime's model-attempt budget and defaults to three. All values are validat
 - Session tests assert item round-trips, atomic JSON persistence, resume, rollback, CAS conflicts, and
   separation of transient summaries from durable history.
 - Context tests assert prompt ownership, allowlisted on-demand knowledge, whole-turn trimming, tool
-  pairing, structural/model summary provenance, overflow errors, and deterministic context reports.
+  pairing, structural/model summary provenance, overflow errors, deterministic context reports,
+  lower-authority memory projection, atomic memory omission, RAG separation, and disabled-path
+  regression snapshots.
 - Retrieval tests assert exact offsets, update/delete behavior, duplicate folding, embedding identity,
   atomic JSON persistence, empty retrieval, citation propagation, prompt isolation, and ranking reports.
 - Memory service tests assert transient proposals, policy rejection, digest and clock revalidation,
@@ -560,9 +576,9 @@ nondeterminism make it an unsuitable correctness gate.
   distributed lease, append-only history, migration framework, tenant isolation, or retention policy.
 - Context budgets estimate characters rather than provider tokens. Structural and model summaries
   are lossy, and model summarization adds a provider call before the main agent run.
-- Memory management and request-time recall are explicit and cross-session through the service,
-  stores, selector, and `dqagent-memory` CLI; there is no recall/context projection, chat
-  integration, or model-assisted extraction yet.
+- Memory management, request-time recall, and bounded recall/context projection are explicit and
+  cross-session through the service, stores, selector, ContextBuilder, and `dqagent-memory` CLI;
+  chat orchestration and model-assisted extraction are not integrated yet.
 - The retrieval store is small, synchronous, single-process, and brute-force. Hashing embeddings are
   lexical, exact digest deduplication misses near-duplicates, and answer checks use explicit lexical
   claims rather than a semantic or LLM-based judge.

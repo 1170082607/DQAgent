@@ -82,10 +82,12 @@ retrieval boundaries, citation provenance, and independent retrieval evaluation.
   credentials; it defaults to `.local/memory.sqlite3` and accepts an explicit `--database` path.
 - Content-free memory operation metadata for event-ready audit attributes; memory content remains in
   explicit result payloads only.
+- Request-time memory recall projected into bounded context as lower-authority untrusted user data,
+  with atomic record omission, independent budgeting, and content-free projection evidence.
 - Environment-based configuration with explicit validation.
 - Unit tests, Ruff linting, mypy strict type checking, and GitHub Actions CI.
 
-Memory ranking, recall/context and chat integration, model-assisted extraction, streaming, hard
+Chat memory orchestration, model-assisted extraction, streaming, hard
 execution isolation, approval policy, distributed session/workflow leases, durable telemetry delivery,
 LLM-as-judge, and repeated live-model sampling remain deferred. Evaluation, security, durability, and
 observability remain continuous constraints for later phases.

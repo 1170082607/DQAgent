@@ -244,8 +244,18 @@ meet this phase's objective.
 - [x] Test filter-before-rank, scope isolation, expired and superseded exclusion, ranking ties,
   explicit no-result behavior, bounded recall, and harmful over-retrieval.
 
-Recall/context integration, chat integration, and model-assisted extraction remain later Phase 8
-work.
+**T8 delivered:**
+
+- [x] Project a completed `MemoryRecall` through `ContextBuilder` as a lower-authority,
+  untrusted user-data block with an independent character budget.
+- [x] Preserve current-request, mandatory-prompt, RAG, and required-recent-turn priority while
+  admitting memory records atomically before older transcript and summary content.
+- [x] Return content-free memory projection evidence and event attributes without memory payloads
+  or raw scope IDs.
+- [x] Regression-test disabled memory behavior against the Phase 6/7 context checkpoint and test
+  empty recall, prompt injection-shaped memory, budget omission, and RAG separation.
+
+Chat integration and model-assisted extraction remain later Phase 8 work.
 
 ### Phase 9: Coding Agent Harness and Safety
 
