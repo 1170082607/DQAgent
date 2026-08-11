@@ -2,10 +2,10 @@
 
 ## Status
 
-This document describes the implemented Phase 8 T5 architecture. Memory management is available as
-a model-free explicit application service; memory recall/ranking, context integration, chat
-integration, model-assisted extraction, hard execution isolation, and other future capabilities
-remain in the [roadmap](roadmap.md).
+This document describes the implemented Phase 8 T6 architecture. Memory management is available as
+a model-free explicit application service and an independent `dqagent-memory` CLI; memory
+recall/ranking, context integration, chat integration, model-assisted extraction, hard execution
+isolation, and other future capabilities remain in the [roadmap](roadmap.md).
 
 ## System Context
 
@@ -40,12 +40,16 @@ Session ID -> SessionAgentApplication -> RunCoordinator -> Retriever
 
 Context case -> ContextEvaluationRunner -> production ContextBuilder -> context report
 
-Memory management request -> MemoryService -> MemoryPolicy + MemoryConsolidator + MemoryStore
+Memory management request -> dqagent-memory CLI -> MemoryService
+                                      |             +-> MemoryPolicy + MemoryConsolidator + MemoryStore
+                                      +-> explicit scope, confirmation, and output boundary
 ```
 
-The CLI is the composition root. It creates the provider adapter, built-in tool registry, retry
-policy, runtime, and stateful application. `ChatApplication` remains a direct text-only use case and
-does not use the agent runtime.
+The main CLI is the composition root for model-backed chat. The independent `dqagent-memory` CLI is
+another composition root: it creates only `DefaultMemoryPolicy`, `MemoryService`, and
+`SqliteMemoryStore`; it does not load settings, provider credentials, models, agent tools, or chat
+state. Every memory command receives `--scope-kind` and `--scope-id` explicitly. Its database
+defaults to `.local/memory.sqlite3` and can be overridden with `--database`.
 
 When `--session-id` is supplied, the CLI composes `JsonFileSessionStore`, `PromptAssembler`, and
 `ContextBuilder` around `SessionAgentApplication`. A later process using the same ID resumes the
@@ -120,6 +124,16 @@ Memory result objects may contain records because they are the application paylo
 caller. Their `MemoryEventMetadata`, and the metadata attached to service errors, contain only
 operation, outcome/reason, scope, revision, IDs, counts, and candidate digests. They never copy
 memory content into event-ready or error metadata.
+
+The memory CLI previews remember/correct candidates through a process-local, non-persistent service.
+It prints the exact candidate fields and digest, then accepts only `yes` or `confirm`; a rejection or
+EOF performs no SQLite operation. After confirmation, it constructs a persistent service and passes
+that same immutable candidate and digest to `confirm` or `correct`, so the service rechecks policy,
+clock, scope, and the store revision. `forget` shows the exact target before the same confirmation
+step. There is no bulk-clear command or `--yes` bypass. Successful output is stdout; sanitized
+errors are stderr. Exit code `0` means success, `1` an operational error, `2` usage/validation,
+`3` explicit/EOF confirmation rejection, and `4` policy denial. Denied candidate output never prints
+the candidate payload.
 
 This split is similar to an application service invoking work inside a transaction coordinator while
 delegating one stage to an execution engine. The analogy is incomplete because the lifecycle provides
@@ -473,7 +487,7 @@ MemoryService -> MemoryPolicy + MemoryConsolidator + MemoryStore
 - MemoryService owns memory policy/consolidation orchestration; MemoryStore only loads exact scopes
   and applies validated change sets. The store has no remember/retrieve/sensitivity policy.
 - Memory candidates are transient; there is no persistent pending-candidate queue. Memory is not
-  connected to the model, retrieval ranking, active context, or chat orchestration in T5.
+  connected to the model, retrieval ranking, active context, or chat orchestration in T6.
 
 ## Configuration
 
@@ -507,6 +521,10 @@ the runtime's model-attempt budget and defaults to three. All values are validat
 - Memory service tests assert transient proposals, policy rejection, digest and clock revalidation,
   exact-scope operations, duplicate refresh, topic conflict, CAS concurrency, expiry, atomic
   correction/forgetting, content-free metadata, and an SQLite integration smoke path.
+- Memory CLI tests assert explicit scope parsing, model-free composition, exact candidate display,
+  confirmation rejection/EOF zero-write behavior, sensitive-payload suppression, cross-instance
+  SQLite visibility, lifecycle/provenance output, correction, forgetting, tombstones, and stable
+  exit/error streams.
 - CI runs Ruff, strict mypy, and pytest with at least 85% coverage.
 - CI also runs the credential-free deterministic behavioral suite after implementation tests.
 
@@ -525,8 +543,9 @@ nondeterminism make it an unsuitable correctness gate.
   distributed lease, append-only history, migration framework, tenant isolation, or retention policy.
 - Context budgets estimate characters rather than provider tokens. Structural and model summaries
   are lossy, and model summarization adds a provider call before the main agent run.
-- Memory management is explicit and cross-session through its service/stores, but there is no memory
-  ranking, recall/context projection, chat integration, or model-assisted extraction yet.
+- Memory management is explicit and cross-session through its service/stores and
+  `dqagent-memory` CLI, but there is no memory ranking, recall/context projection, chat integration,
+  or model-assisted extraction yet.
 - The retrieval store is small, synchronous, single-process, and brute-force. Hashing embeddings are
   lexical, exact digest deduplication misses near-duplicates, and answer checks use explicit lexical
   claims rather than a semantic or LLM-based judge.

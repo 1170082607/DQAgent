@@ -1,5 +1,6 @@
 """Deterministic admission and pre-ranking eligibility for long-term memory."""
 
+import re
 from datetime import datetime
 
 from dqagent.errors import MemoryValidationError
@@ -31,6 +32,16 @@ __all__ = [
     "RecallEligibilityReason",
 ]
 
+_SECRET_ASSIGNMENT_PATTERN = re.compile(
+    r"(?i)(?<![A-Za-z0-9])(?:aws[_ -]?secret[_ -]?access[_ -]?key|api[_ -]?key|"
+    r"access[_ -]?token|auth[_ -]?token|client[_ -]?secret|password|passwd|"
+    r"private[_ -]?key|secret|token)\s*[:=]\s*\S+"
+)
+_PRIVATE_KEY_MARKER_PATTERN = re.compile(
+    r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----",
+    re.IGNORECASE,
+)
+
 
 class DefaultMemoryPolicy:
     """Conservative v1 policy with no external dependencies or implicit clock."""
@@ -55,6 +66,8 @@ class DefaultMemoryPolicy:
             return _deny_admission(AdmissionReason.SECRET_CONTENT_NOT_ALLOWED)
         if candidate.sensitivity is MemorySensitivity.SENSITIVE:
             return _deny_admission(AdmissionReason.SENSITIVE_CONTENT_NOT_ALLOWED)
+        if _looks_like_secret_content(candidate.content):
+            return _deny_admission(AdmissionReason.SECRET_CONTENT_NOT_ALLOWED)
         if not _kind_allowed_in_scope(candidate.kind, scope.kind):
             return _deny_admission(AdmissionReason.KIND_NOT_ALLOWED)
         if candidate.provenance.extracted_at > now:
@@ -112,6 +125,15 @@ def _kind_allowed_in_scope(kind: MemoryKind, scope_kind: MemoryScopeKind) -> boo
     if scope_kind is MemoryScopeKind.USER:
         return kind in {MemoryKind.PREFERENCE, MemoryKind.USER_FACT}
     return kind is MemoryKind.EXPERIENCE
+
+
+def _looks_like_secret_content(content: str) -> bool:
+    """Reject a small set of obvious credential markers before durable admission."""
+
+    return bool(
+        _SECRET_ASSIGNMENT_PATTERN.search(content)
+        or _PRIVATE_KEY_MARKER_PATTERN.search(content)
+    )
 
 
 def _deny_admission(reason: AdmissionReason) -> AdmissionDecision:

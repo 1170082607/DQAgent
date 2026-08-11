@@ -78,6 +78,8 @@ retrieval boundaries, citation provenance, and independent retrieval evaluation.
   memory stores.
 - A model-free `MemoryService` with transient proposal/preview, exact digest confirmation, list/show,
   atomic correction, forgetting tombstones, expiry materialization, and fail-closed errors.
+- An independent `dqagent-memory` CLI for remember, list, show, correct, and forget without model
+  credentials; it defaults to `.local/memory.sqlite3` and accepts an explicit `--database` path.
 - Content-free memory operation metadata for event-ready audit attributes; memory content remains in
   explicit result payloads only.
 - Environment-based configuration with explicit validation.
@@ -228,6 +230,27 @@ Run the independent retrieval baseline:
 dqagent-retrieval-eval --output .local/evaluations/retrieval-report.json
 ```
 
+Manage explicit memory without starting an agent or configuring a provider:
+
+```bash
+dqagent-memory remember --scope-kind user --scope-id user-7 \
+  --kind preference --topic response.language \
+  --content "The user prefers concise Chinese answers."
+dqagent-memory list --scope-kind user --scope-id user-7
+dqagent-memory show --scope-kind user --scope-id user-7 --memory-id MEMORY_ID
+dqagent-memory correct --scope-kind user --scope-id user-7 --memory-id MEMORY_ID \
+  --kind preference --topic response.language \
+  --content "The user prefers concise English answers."
+dqagent-memory forget --scope-kind user --scope-id user-7 --memory-id MEMORY_ID
+```
+
+`remember` and `correct` print the exact transient candidate, provenance summary, expiry, and
+digest before asking for `yes` or `confirm`. `forget` prints the exact target before the same
+confirmation. A rejection or EOF does not create a pending queue or mutate the database; there is
+no bulk-clear command and no `--yes` bypass. Successful output is stdout, sanitized failures are
+stderr, and the CLI never reads `DQAGENT_MODEL`, provider credentials, or a session ID to choose
+the memory scope.
+
 Run the separate answer-level RAG suite with the configured live provider. Repeat it before drawing
 model-quality conclusions:
 
@@ -270,6 +293,7 @@ src/dqagent/memory.py Domain values and policy contracts for selected memory
 src/dqagent/memory_consolidation.py Store-neutral deterministic consolidation
 src/dqagent/memory_service.py Explicit memory management application service
 src/dqagent/memory_store.py Exact-scope transactional memory stores
+src/dqagent/memory_cli.py Independent model-free memory management CLI
 src/dqagent/workflow.py Deterministic workflow definition and runner
 src/dqagent/checkpoint.py Workflow checkpoint contract and stores
 evaluations/        Versioned cases and committed baseline reports

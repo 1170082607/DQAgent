@@ -32,6 +32,7 @@ dqagent-context-eval = "dqagent.context_evaluation_cli:main"
 dqagent-index = "dqagent.retrieval_cli:main"
 dqagent-retrieval-eval = "dqagent.retrieval_evaluation_cli:main"
 dqagent-rag-answer-eval = "dqagent.retrieval_answer_evaluation_cli:main"
+dqagent-memory = "dqagent.memory_cli:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }

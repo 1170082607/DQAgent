@@ -226,6 +226,14 @@ meet this phase's objective.
 - [x] Validate scope, candidate digest, policy, and clock again at confirmation time, with
   optimistic-concurrency and content-free operation metadata.
 
+**T6 delivered:**
+
+- [x] Add an independent `dqagent-memory` CLI for remember, list, show, correct, and forget.
+- [x] Require explicit scope kind/ID, local SQLite path selection, exact candidate display, and
+  affirmative confirmation without model/provider configuration or a `--yes` mutation bypass.
+- [x] Keep CLI policy and persistence behind `MemoryService`; test sensitive denial, rejection/EOF
+  zero-write behavior, stable output/error contracts, and cross-instance SQLite visibility.
+
 Memory ranking, recall/context integration, chat integration, and model-assisted extraction remain
 later Phase 8 work.
 

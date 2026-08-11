@@ -481,14 +481,21 @@ class MemoryService:
             ),
         )
 
-    def show(self, scope: MemoryScope, memory_id: str) -> MemoryShowResult:
-        """Show one record from one exact scope, including its lifecycle status."""
+    def show(
+        self,
+        scope: MemoryScope,
+        memory_id: str,
+        *,
+        materialize_expiry: bool = True,
+    ) -> MemoryShowResult:
+        """Show one exact record, optionally without writing expiry materialization."""
 
         _require_scope(scope)
         _require_memory_id(memory_id)
         now = self._now(MemoryOperation.SHOW, scope, memory_id=memory_id)
         snapshot = self._load(MemoryOperation.SHOW, scope, memory_id=memory_id)
-        snapshot = self._materialize_expiry(snapshot, now=now, operation=MemoryOperation.SHOW)
+        if materialize_expiry:
+            snapshot = self._materialize_expiry(snapshot, now=now, operation=MemoryOperation.SHOW)
         record = next((item for item in snapshot.records if item.memory_id == memory_id), None)
         if record is None:
             raise MemoryServiceNotFoundError(

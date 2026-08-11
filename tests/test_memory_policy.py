@@ -232,6 +232,34 @@ def test_default_policy_denies_with_stable_reason(
 
 
 @pytest.mark.parametrize(
+    "content",
+    [
+        "AWS_SECRET_ACCESS_KEY=example",
+        "OPENAI_API_KEY=example",
+        "GITHUB_TOKEN=example",
+        "DATABASE_PASSWORD=example",
+        "-----BEGIN PRIVATE KEY-----",
+    ],
+)
+def test_default_policy_denies_credential_like_content_when_label_is_non_sensitive(
+    content: str,
+) -> None:
+    candidate = replace(
+        make_candidate(sensitivity=MemorySensitivity.NON_SENSITIVE),
+        content=content,
+    )
+
+    decision = DefaultMemoryPolicy().assess_write(candidate, scope=USER_SCOPE, now=NOW)
+
+    assert decision == AdmissionDecision(
+        action=AdmissionAction.DENY,
+        reason=AdmissionReason.SECRET_CONTENT_NOT_ALLOWED,
+        effective_scope=None,
+        expires_at=None,
+    )
+
+
+@pytest.mark.parametrize(
     ("candidate", "reason"),
     [
         (
