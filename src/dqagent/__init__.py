@@ -32,6 +32,17 @@ from dqagent.context import (
 from dqagent.events import RunEvent, RunEventType, RunState
 from dqagent.execution import RunContext
 from dqagent.lifecycle import CoordinatedRun, RunCoordinator, RunRecord, RunScope
+from dqagent.memory_store import (
+    AddMemory,
+    ExpireMemory,
+    ForgetMemory,
+    InMemoryMemoryStore,
+    MemoryChangeSet,
+    MemoryScopeSnapshot,
+    MemoryStore,
+    RefreshMemory,
+    SupersedeMemory,
+)
 from dqagent.models import Message, Role, TokenUsage
 from dqagent.retrieval import (
     CharacterTextChunker,
@@ -147,4 +158,13 @@ __all__ = [
     "WorkflowNode",
     "WorkflowRunResult",
     "WorkflowRunner",
+    "AddMemory",
+    "ExpireMemory",
+    "ForgetMemory",
+    "InMemoryMemoryStore",
+    "MemoryChangeSet",
+    "MemoryScopeSnapshot",
+    "MemoryStore",
+    "RefreshMemory",
+    "SupersedeMemory",
 ]

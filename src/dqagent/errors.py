@@ -136,3 +136,17 @@ class MemoryValidationError(MemoryError, ValueError):
     """Raised when a long-term memory domain value violates an invariant."""
 
     category = ErrorCategory.CONFIGURATION
+
+
+class MemoryNotFoundError(MemoryError):
+    """Raised when a memory change targets a record that does not exist."""
+
+
+class MemoryConflictError(MemoryError):
+    """Raised when a stale scope revision attempts to overwrite newer memory state."""
+
+
+class MemoryCorruptChangeError(MemoryError):
+    """Raised when a memory change set violates the transactional store contract."""
+
+    category = ErrorCategory.CONFIGURATION
