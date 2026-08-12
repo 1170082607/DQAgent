@@ -94,3 +94,31 @@ Allowed source IDs are alternatives, not a requirement to cite every listed docu
 explicit lexical predicates, not semantic entailment or an LLM judge. Citation coverage is `null`
 for no-answer cases and excluded from the coverage mean; those cases use the separate
 insufficient-evidence check. The suite remains separate from the credential-free retrieval gate.
+
+## Phase 8 Memory
+
+`cases/phase-8-memory-v1.json` and `baselines/phase-8-memory-deterministic-v1.json` are the
+credential-free long-term memory regression suite and baseline. Run them with:
+
+```bash
+dqagent-memory-eval --output .local/evaluations/memory-report.json
+```
+
+Each case composes the production `MemoryService`, `DefaultMemoryPolicy`, SQLite memory store,
+`MemorySelector`, `ContextBuilder`, and `SessionAgentApplication`. Only the extractor and answer
+LLM are scripted fixtures. Write admission, recall ranking, context selection, and answer
+utilization are reported as separate stages, so a passing answer cannot hide an upstream failure.
+
+The report includes false admission rate, `Recall@k`, `Precision@k`, scope leakage, stale/forgotten
+recall, harmful over-retrieval, correction compliance, memory context character/record counts, and
+direct answer predicate pass rate. `null` means a metric is not applicable because its denominator
+is zero; the report also includes an explicit no-result correctness metric whose denominator includes
+enabled-memory recall cases with both expected-result and expected-no-result outcomes. Disabled-memory
+controls are marked not applicable and excluded from that denominator. Direct predicates are exact
+lexical checks; there is no LLM-as-judge.
+
+The baseline proves deterministic architecture and regression behavior only. Its hashing embedding
+is lexical feature hashing, and its scripted answer is not evidence of production model quality.
+The suite records extractor, prompt, policy, selector, store, context, session, and answer
+identities. Any future live extraction/answer mode must remain a separate non-CI report with model,
+prompt, policy, and selector identities recorded; the current gate does not require credentials.

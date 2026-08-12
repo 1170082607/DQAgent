@@ -1,0 +1,2343 @@
+{
+  "report_schema_version": 2,
+  "suite_id": "phase-8-memory-v1",
+  "suite_schema_version": 1,
+  "mode": "deterministic",
+  "generated_at": "2026-08-12T12:19:40.598865+00:00",
+  "identities": {
+    "evaluation_mode": "deterministic",
+    "memory_store": "sqlite-memory-store-v1",
+    "memory_policy": "default-memory-policy-v1",
+    "memory_embedding": "hashing-token-v1:256",
+    "memory_selector": "memory-selector-v1:hashing-token-v1:256",
+    "extractor": "phase-8-deterministic-extractor-v1",
+    "answer": "phase-8-scripted-answer-v1",
+    "prompt": "phase-8-memory-evaluation-prompt-v1",
+    "context_builder": "production-context-builder-v1",
+    "session_application": "production-session-agent-application-v1"
+  },
+  "metric_semantics": {
+    "false_admission_rate": "false durable writes divided by candidates expected not to be admitted; null when that denominator is zero",
+    "recall_at_k": "relevant labels recalled in the top k divided by relevant labels; null for an expected no-result case or an empty relevance set",
+    "precision_at_k": "relevant labels in the returned top k divided by returned labels; null when no labels were returned, for expected no-result cases, or with no relevance set",
+    "scope_leakage_rate": "foreign-scope matches divided by foreign-scope records under test; null when no scope-isolation control exists",
+    "stale_or_forgotten_recall_rate": "stale or forgotten labels recalled divided by stale or forgotten labels under test; null when no stale or forgotten control exists",
+    "harmful_over_retrieval_rate": "harmful labels recalled divided by harmful labels under test; null when no harmful control exists",
+    "correction_compliance_rate": "correction cases where the replacement is recalled and the superseded target is not; null when no correction case exists",
+    "memory_context_characters": "characters in the production ContextBuilder memory projection; per-case zero means no memory block was projected",
+    "memory_context_count": "complete memory records projected by ContextBuilder; records are never partially truncated",
+    "direct_answer_predicate_pass_rate": "cases passing exact/contains/absent direct answer predicates; no LLM judge is used",
+    "no_result_correct": "actual empty recall equals the case expectation for enabled-memory recall cases; disabled-memory controls are not applicable and excluded from the denominator"
+  },
+  "summary": {
+    "passed": true,
+    "passed_cases": 13,
+    "failed_cases": 0,
+    "executed_cases": 13,
+    "false_admission_rate": 0.0,
+    "false_admission_denominator": 3,
+    "mean_recall_at_k": 1.0,
+    "recall_at_k_applicable_cases": 7,
+    "mean_precision_at_k": 1.0,
+    "precision_at_k_applicable_cases": 7,
+    "scope_leakage_rate": 0.0,
+    "scope_leakage_denominator": 1,
+    "stale_or_forgotten_recall_rate": 0.0,
+    "stale_or_forgotten_denominator": 3,
+    "harmful_over_retrieval_rate": 0.0,
+    "harmful_over_retrieval_denominator": 2,
+    "correction_compliance_rate": 1.0,
+    "correction_compliance_denominator": 1,
+    "mean_memory_context_characters": 366.1666666666667,
+    "mean_memory_context_count": 0.5833333333333334,
+    "memory_context_denominator": 12,
+    "direct_answer_predicate_pass_rate": 1.0,
+    "direct_answer_denominator": 13,
+    "no_result_correct": 1.0,
+    "no_result_denominator": 12,
+    "expected_no_result_cases": 5,
+    "empty_result_cases": 5
+  },
+  "results": [
+    {
+      "case_id": "confirmed-preference-cross-session",
+      "passed": true,
+      "run_id": "phase8-confirmed-preference-cross-session",
+      "stage_event_types": [
+        "run_started",
+        "memory_recall_started",
+        "memory_recall_completed",
+        "context_assembled",
+        "model_request_started",
+        "model_request_completed",
+        "run_completed"
+      ],
+      "stages": {
+        "write_admission": {
+          "candidate_count": 1,
+          "expected_admitted_count": 1,
+          "actual_admitted_count": 1,
+          "policy_denied_count": 0,
+          "false_admission_count": 0,
+          "false_admission_rate": null,
+          "passed": true,
+          "checks": [
+            {
+              "name": "admission.expected_write",
+              "passed": true,
+              "detail": "expected durable write=True, observed=True"
+            },
+            {
+              "name": "admission.false_admission",
+              "passed": true,
+              "detail": "observed 0 false durable writes"
+            }
+          ]
+        },
+        "recall_ranking": [
+          {
+            "query": "concise Chinese answers",
+            "candidate_count": 1,
+            "recalled_labels": [
+              "concise_chinese"
+            ],
+            "recall_at_k": 1.0,
+            "precision_at_k": 1.0,
+            "scope_leakage_count": 0,
+            "scope_control_count": 0,
+            "scope_leakage_rate": null,
+            "stale_or_forgotten_recall_count": 0,
+            "stale_or_forgotten_expected_count": 0,
+            "stale_or_forgotten_recall_rate": null,
+            "harmful_over_retrieval_count": 0,
+            "harmful_expected_count": 0,
+            "harmful_over_retrieval_rate": null,
+            "correction_compliance": null,
+            "applicable": true,
+            "no_result": false,
+            "expected_no_result": false,
+            "no_result_correct": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "recall.no_result",
+                "passed": true,
+                "detail": "expected no_result=False, observed=False"
+              },
+              {
+                "name": "recall.selected_labels",
+                "passed": true,
+                "detail": "expected ('concise_chinese',), observed ('concise_chinese',)"
+              },
+              {
+                "name": "recall.recall_at_k",
+                "passed": true,
+                "detail": "observed 1.000000, minimum 1.000000"
+              },
+              {
+                "name": "recall.precision_at_k",
+                "passed": true,
+                "detail": "observed 1.000000, minimum 1.000000"
+              }
+            ]
+          }
+        ],
+        "context_selection": {
+          "memory_enabled": true,
+          "projection_present": true,
+          "memory_context_characters": 637,
+          "memory_context_count": 1,
+          "recalled_count": 1,
+          "omitted_count": 0,
+          "projected_labels": [
+            "concise_chinese"
+          ],
+          "passed": true,
+          "checks": [
+            {
+              "name": "context.projection_presence",
+              "passed": true,
+              "detail": "memory_enabled=True, projection_present=True"
+            },
+            {
+              "name": "context.memory_budget",
+              "passed": true,
+              "detail": "projection is within the configured independent memory budget"
+            },
+            {
+              "name": "context.memory_untrusted_block",
+              "passed": true,
+              "detail": "memory is a separately delimited lower-authority user-data block"
+            },
+            {
+              "name": "context.memory_rag_separation",
+              "passed": true,
+              "detail": "memory and RAG remain separate context blocks"
+            },
+            {
+              "name": "context.production_stage_order",
+              "passed": true,
+              "detail": "production recall, context, runtime, and session path emitted in order"
+            },
+            {
+              "name": "context.session_commit",
+              "passed": true,
+              "detail": "successful production run committed only the transcript turn, not memory context"
+            },
+            {
+              "name": "context.projected_labels",
+              "passed": true,
+              "detail": "expected ('concise_chinese',), observed ('concise_chinese',)"
+            }
+          ]
+        },
+        "answer_utilization": {
+          "output": "I will use concise Chinese answers.",
+          "direct_answer_predicate_pass": true,
+          "answer_utilization_predicate_pass": true,
+          "citation_separation_pass": null,
+          "passed": true,
+          "checks": [
+            {
+              "name": "answer.non_empty",
+              "passed": true,
+              "detail": "answer is non-empty"
+            },
+            {
+              "name": "answer.exact",
+              "passed": true,
+              "detail": "expected 'I will use concise Chinese answers.', observed 'I will use concise Chinese answers.'"
+            },
+            {
+              "name": "answer.contains_all",
+              "passed": true,
+              "detail": "all required fragments found"
+            },
+            {
+              "name": "answer.absent_all",
+              "passed": true,
+              "detail": "no forbidden fragments found"
+            },
+            {
+              "name": "answer.memory_utilization",
+              "passed": true,
+              "detail": "memory labels available/blocked as expected"
+            },
+            {
+              "name": "answer.fixture_consumed",
+              "passed": true,
+              "detail": "scripted answer requests observed=1"
+            }
+          ]
+        }
+      },
+      "error": null
+    },
+    {
+      "case_id": "assistant-false-inference-not-admitted",
+      "passed": true,
+      "run_id": "phase8-assistant-false-inference-not-admitted",
+      "stage_event_types": [
+        "run_started",
+        "memory_recall_started",
+        "memory_recall_completed",
+        "context_assembled",
+        "model_request_started",
+        "model_request_completed",
+        "run_completed"
+      ],
+      "stages": {
+        "write_admission": {
+          "candidate_count": 1,
+          "expected_admitted_count": 0,
+          "actual_admitted_count": 0,
+          "policy_denied_count": 0,
+          "false_admission_count": 0,
+          "false_admission_rate": 0.0,
+          "passed": true,
+          "checks": [
+            {
+              "name": "admission.expected_write",
+              "passed": true,
+              "detail": "expected durable write=False, observed=False"
+            },
+            {
+              "name": "admission.false_admission",
+              "passed": true,
+              "detail": "observed 0 false durable writes"
+            }
+          ]
+        },
+        "recall_ranking": [
+          {
+            "query": "What jazz preference is saved?",
+            "candidate_count": 0,
+            "recalled_labels": [],
+            "recall_at_k": null,
+            "precision_at_k": null,
+            "scope_leakage_count": 0,
+            "scope_control_count": 0,
+            "scope_leakage_rate": null,
+            "stale_or_forgotten_recall_count": 0,
+            "stale_or_forgotten_expected_count": 0,
+            "stale_or_forgotten_recall_rate": null,
+            "harmful_over_retrieval_count": 0,
+            "harmful_expected_count": 0,
+            "harmful_over_retrieval_rate": null,
+            "correction_compliance": null,
+            "applicable": true,
+            "no_result": true,
+            "expected_no_result": true,
+            "no_result_correct": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "recall.no_result",
+                "passed": true,
+                "detail": "expected no_result=True, observed=True"
+              },
+              {
+                "name": "recall.selected_labels",
+                "passed": true,
+                "detail": "expected (), observed ()"
+              },
+              {
+                "name": "recall.recall_at_k",
+                "passed": true,
+                "detail": "not applicable: no relevant-result denominator"
+              },
+              {
+                "name": "recall.precision_at_k",
+                "passed": true,
+                "detail": "not applicable: no returned-result denominator"
+              }
+            ]
+          }
+        ],
+        "context_selection": {
+          "memory_enabled": true,
+          "projection_present": true,
+          "memory_context_characters": 0,
+          "memory_context_count": 0,
+          "recalled_count": 0,
+          "omitted_count": 0,
+          "projected_labels": [],
+          "passed": true,
+          "checks": [
+            {
+              "name": "context.projection_presence",
+              "passed": true,
+              "detail": "memory_enabled=True, projection_present=True"
+            },
+            {
+              "name": "context.memory_budget",
+              "passed": true,
+              "detail": "projection is within the configured independent memory budget"
+            },
+            {
+              "name": "context.memory_untrusted_block",
+              "passed": true,
+              "detail": "memory is a separately delimited lower-authority user-data block"
+            },
+            {
+              "name": "context.memory_rag_separation",
+              "passed": true,
+              "detail": "memory and RAG remain separate context blocks"
+            },
+            {
+              "name": "context.production_stage_order",
+              "passed": true,
+              "detail": "production recall, context, runtime, and session path emitted in order"
+            },
+            {
+              "name": "context.session_commit",
+              "passed": true,
+              "detail": "successful production run committed only the transcript turn, not memory context"
+            },
+            {
+              "name": "context.projected_labels",
+              "passed": true,
+              "detail": "expected (), observed ()"
+            }
+          ]
+        },
+        "answer_utilization": {
+          "output": "No unconfirmed assistant inference was saved.",
+          "direct_answer_predicate_pass": true,
+          "answer_utilization_predicate_pass": null,
+          "citation_separation_pass": null,
+          "passed": true,
+          "checks": [
+            {
+              "name": "answer.non_empty",
+              "passed": true,
+              "detail": "answer is non-empty"
+            },
+            {
+              "name": "answer.exact",
+              "passed": true,
+              "detail": "expected 'No unconfirmed assistant inference was saved.', observed 'No unconfirmed assistant inference was saved.'"
+            },
+            {
+              "name": "answer.contains_all",
+              "passed": true,
+              "detail": "all required fragments found"
+            },
+            {
+              "name": "answer.absent_all",
+              "passed": true,
+              "detail": "no forbidden fragments found"
+            },
+            {
+              "name": "answer.fixture_consumed",
+              "passed": true,
+              "detail": "scripted answer requests observed=1"
+            }
+          ]
+        }
+      },
+      "error": null
+    },
+    {
+      "case_id": "current-request-overrides-memory",
+      "passed": true,
+      "run_id": "phase8-current-request-overrides-memory",
+      "stage_event_types": [
+        "run_started",
+        "memory_recall_started",
+        "memory_recall_completed",
+        "context_assembled",
+        "model_request_started",
+        "model_request_completed",
+        "run_completed"
+      ],
+      "stages": {
+        "write_admission": {
+          "candidate_count": 1,
+          "expected_admitted_count": 1,
+          "actual_admitted_count": 1,
+          "policy_denied_count": 0,
+          "false_admission_count": 0,
+          "false_admission_rate": null,
+          "passed": true,
+          "checks": [
+            {
+              "name": "admission.expected_write",
+              "passed": true,
+              "detail": "expected durable write=True, observed=True"
+            },
+            {
+              "name": "admission.false_admission",
+              "passed": true,
+              "detail": "observed 0 false durable writes"
+            }
+          ]
+        },
+        "recall_ranking": [
+          {
+            "query": "I now prefer concise answers; what style should you use?",
+            "candidate_count": 1,
+            "recalled_labels": [
+              "detailed_preference"
+            ],
+            "recall_at_k": 1.0,
+            "precision_at_k": 1.0,
+            "scope_leakage_count": 0,
+            "scope_control_count": 0,
+            "scope_leakage_rate": null,
+            "stale_or_forgotten_recall_count": 0,
+            "stale_or_forgotten_expected_count": 0,
+            "stale_or_forgotten_recall_rate": null,
+            "harmful_over_retrieval_count": 0,
+            "harmful_expected_count": 0,
+            "harmful_over_retrieval_rate": null,
+            "correction_compliance": null,
+            "applicable": true,
+            "no_result": false,
+            "expected_no_result": false,
+            "no_result_correct": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "recall.no_result",
+                "passed": true,
+                "detail": "expected no_result=False, observed=False"
+              },
+              {
+                "name": "recall.selected_labels",
+                "passed": true,
+                "detail": "expected ('detailed_preference',), observed ('detailed_preference',)"
+              },
+              {
+                "name": "recall.recall_at_k",
+                "passed": true,
+                "detail": "observed 1.000000, minimum 1.000000"
+              },
+              {
+                "name": "recall.precision_at_k",
+                "passed": true,
+                "detail": "observed 1.000000, minimum 1.000000"
+              }
+            ]
+          }
+        ],
+        "context_selection": {
+          "memory_enabled": true,
+          "projection_present": true,
+          "memory_context_characters": 621,
+          "memory_context_count": 1,
+          "recalled_count": 1,
+          "omitted_count": 0,
+          "projected_labels": [
+            "detailed_preference"
+          ],
+          "passed": true,
+          "checks": [
+            {
+              "name": "context.projection_presence",
+              "passed": true,
+              "detail": "memory_enabled=True, projection_present=True"
+            },
+            {
+              "name": "context.memory_budget",
+              "passed": true,
+              "detail": "projection is within the configured independent memory budget"
+            },
+            {
+              "name": "context.memory_untrusted_block",
+              "passed": true,
+              "detail": "memory is a separately delimited lower-authority user-data block"
+            },
+            {
+              "name": "context.memory_rag_separation",
+              "passed": true,
+              "detail": "memory and RAG remain separate context blocks"
+            },
+            {
+              "name": "context.production_stage_order",
+              "passed": true,
+              "detail": "production recall, context, runtime, and session path emitted in order"
+            },
+            {
+              "name": "context.session_commit",
+              "passed": true,
+              "detail": "successful production run committed only the transcript turn, not memory context"
+            },
+            {
+              "name": "context.projected_labels",
+              "passed": true,
+              "detail": "expected ('detailed_preference',), observed ('detailed_preference',)"
+            }
+          ]
+        },
+        "answer_utilization": {
+          "output": "I will follow the current request for concise answers.",
+          "direct_answer_predicate_pass": true,
+          "answer_utilization_predicate_pass": true,
+          "citation_separation_pass": null,
+          "passed": true,
+          "checks": [
+            {
+              "name": "answer.non_empty",
+              "passed": true,
+              "detail": "answer is non-empty"
+            },
+            {
+              "name": "answer.exact",
+              "passed": true,
+              "detail": "expected 'I will follow the current request for concise answers.', observed 'I will follow the current request for concise answers.'"
+            },
+            {
+              "name": "answer.contains_all",
+              "passed": true,
+              "detail": "all required fragments found"
+            },
+            {
+              "name": "answer.absent_all",
+              "passed": true,
+              "detail": "no forbidden fragments found"
+            },
+            {
+              "name": "answer.memory_utilization",
+              "passed": true,
+              "detail": "memory labels available/blocked as expected"
+            },
+            {
+              "name": "answer.fixture_consumed",
+              "passed": true,
+              "detail": "scripted answer requests observed=1"
+            }
+          ]
+        }
+      },
+      "error": null
+    },
+    {
+      "case_id": "correction-supersedes-old-preference",
+      "passed": true,
+      "run_id": "phase8-correction-supersedes-old-preference",
+      "stage_event_types": [
+        "run_started",
+        "memory_recall_started",
+        "memory_recall_completed",
+        "context_assembled",
+        "model_request_started",
+        "model_request_completed",
+        "run_completed"
+      ],
+      "stages": {
+        "write_admission": {
+          "candidate_count": 2,
+          "expected_admitted_count": 2,
+          "actual_admitted_count": 2,
+          "policy_denied_count": 0,
+          "false_admission_count": 0,
+          "false_admission_rate": null,
+          "passed": true,
+          "checks": [
+            {
+              "name": "admission.expected_write",
+              "passed": true,
+              "detail": "expected durable write=True, observed=True"
+            },
+            {
+              "name": "admission.expected_write",
+              "passed": true,
+              "detail": "expected durable write=True, observed=True"
+            },
+            {
+              "name": "admission.false_admission",
+              "passed": true,
+              "detail": "observed 0 false durable writes"
+            }
+          ]
+        },
+        "recall_ranking": [
+          {
+            "query": "What concise answer preference is active?",
+            "candidate_count": 1,
+            "recalled_labels": [
+              "new_concise"
+            ],
+            "recall_at_k": 1.0,
+            "precision_at_k": 1.0,
+            "scope_leakage_count": 0,
+            "scope_control_count": 0,
+            "scope_leakage_rate": null,
+            "stale_or_forgotten_recall_count": 0,
+            "stale_or_forgotten_expected_count": 1,
+            "stale_or_forgotten_recall_rate": 0.0,
+            "harmful_over_retrieval_count": 0,
+            "harmful_expected_count": 1,
+            "harmful_over_retrieval_rate": 0.0,
+            "correction_compliance": true,
+            "applicable": true,
+            "no_result": false,
+            "expected_no_result": false,
+            "no_result_correct": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "recall.no_result",
+                "passed": true,
+                "detail": "expected no_result=False, observed=False"
+              },
+              {
+                "name": "recall.selected_labels",
+                "passed": true,
+                "detail": "expected ('new_concise',), observed ('new_concise',)"
+              },
+              {
+                "name": "recall.recall_at_k",
+                "passed": true,
+                "detail": "observed 1.000000, minimum 1.000000"
+              },
+              {
+                "name": "recall.precision_at_k",
+                "passed": true,
+                "detail": "observed 1.000000, minimum 1.000000"
+              },
+              {
+                "name": "recall.stale_or_forgotten",
+                "passed": true,
+                "detail": "stale/forgotten matches=0"
+              },
+              {
+                "name": "recall.harmful_over_retrieval",
+                "passed": true,
+                "detail": "harmful matches=0"
+              },
+              {
+                "name": "recall.correction_compliance",
+                "passed": true,
+                "detail": "True"
+              }
+            ]
+          }
+        ],
+        "context_selection": {
+          "memory_enabled": true,
+          "projection_present": true,
+          "memory_context_characters": 624,
+          "memory_context_count": 1,
+          "recalled_count": 1,
+          "omitted_count": 0,
+          "projected_labels": [
+            "new_concise"
+          ],
+          "passed": true,
+          "checks": [
+            {
+              "name": "context.projection_presence",
+              "passed": true,
+              "detail": "memory_enabled=True, projection_present=True"
+            },
+            {
+              "name": "context.memory_budget",
+              "passed": true,
+              "detail": "projection is within the configured independent memory budget"
+            },
+            {
+              "name": "context.memory_untrusted_block",
+              "passed": true,
+              "detail": "memory is a separately delimited lower-authority user-data block"
+            },
+            {
+              "name": "context.memory_rag_separation",
+              "passed": true,
+              "detail": "memory and RAG remain separate context blocks"
+            },
+            {
+              "name": "context.production_stage_order",
+              "passed": true,
+              "detail": "production recall, context, runtime, and session path emitted in order"
+            },
+            {
+              "name": "context.session_commit",
+              "passed": true,
+              "detail": "successful production run committed only the transcript turn, not memory context"
+            },
+            {
+              "name": "context.projected_labels",
+              "passed": true,
+              "detail": "expected ('new_concise',), observed ('new_concise',)"
+            }
+          ]
+        },
+        "answer_utilization": {
+          "output": "The corrected preference is concise answers.",
+          "direct_answer_predicate_pass": true,
+          "answer_utilization_predicate_pass": true,
+          "citation_separation_pass": null,
+          "passed": true,
+          "checks": [
+            {
+              "name": "answer.non_empty",
+              "passed": true,
+              "detail": "answer is non-empty"
+            },
+            {
+              "name": "answer.exact",
+              "passed": true,
+              "detail": "expected 'The corrected preference is concise answers.', observed 'The corrected preference is concise answers.'"
+            },
+            {
+              "name": "answer.contains_all",
+              "passed": true,
+              "detail": "all required fragments found"
+            },
+            {
+              "name": "answer.absent_all",
+              "passed": true,
+              "detail": "no forbidden fragments found"
+            },
+            {
+              "name": "answer.memory_utilization",
+              "passed": true,
+              "detail": "memory labels available/blocked as expected"
+            },
+            {
+              "name": "answer.fixture_consumed",
+              "passed": true,
+              "detail": "scripted answer requests observed=1"
+            }
+          ]
+        }
+      },
+      "error": null
+    },
+    {
+      "case_id": "expiry-removes-stale-memory",
+      "passed": true,
+      "run_id": "phase8-expiry-removes-stale-memory",
+      "stage_event_types": [
+        "run_started",
+        "memory_recall_started",
+        "memory_recall_completed",
+        "context_assembled",
+        "model_request_started",
+        "model_request_completed",
+        "run_completed"
+      ],
+      "stages": {
+        "write_admission": {
+          "candidate_count": 1,
+          "expected_admitted_count": 1,
+          "actual_admitted_count": 1,
+          "policy_denied_count": 0,
+          "false_admission_count": 0,
+          "false_admission_rate": null,
+          "passed": true,
+          "checks": [
+            {
+              "name": "admission.expected_write",
+              "passed": true,
+              "detail": "expected durable write=True, observed=True"
+            },
+            {
+              "name": "admission.false_admission",
+              "passed": true,
+              "detail": "observed 0 false durable writes"
+            }
+          ]
+        },
+        "recall_ranking": [
+          {
+            "query": "What temporary project update style is active?",
+            "candidate_count": 0,
+            "recalled_labels": [],
+            "recall_at_k": null,
+            "precision_at_k": null,
+            "scope_leakage_count": 0,
+            "scope_control_count": 0,
+            "scope_leakage_rate": null,
+            "stale_or_forgotten_recall_count": 0,
+            "stale_or_forgotten_expected_count": 1,
+            "stale_or_forgotten_recall_rate": 0.0,
+            "harmful_over_retrieval_count": 0,
+            "harmful_expected_count": 0,
+            "harmful_over_retrieval_rate": null,
+            "correction_compliance": null,
+            "applicable": true,
+            "no_result": true,
+            "expected_no_result": true,
+            "no_result_correct": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "recall.no_result",
+                "passed": true,
+                "detail": "expected no_result=True, observed=True"
+              },
+              {
+                "name": "recall.selected_labels",
+                "passed": true,
+                "detail": "expected (), observed ()"
+              },
+              {
+                "name": "recall.recall_at_k",
+                "passed": true,
+                "detail": "not applicable: no relevant-result denominator"
+              },
+              {
+                "name": "recall.precision_at_k",
+                "passed": true,
+                "detail": "not applicable: no returned-result denominator"
+              },
+              {
+                "name": "recall.stale_or_forgotten",
+                "passed": true,
+                "detail": "stale/forgotten matches=0"
+              }
+            ]
+          }
+        ],
+        "context_selection": {
+          "memory_enabled": true,
+          "projection_present": true,
+          "memory_context_characters": 0,
+          "memory_context_count": 0,
+          "recalled_count": 0,
+          "omitted_count": 0,
+          "projected_labels": [],
+          "passed": true,
+          "checks": [
+            {
+              "name": "context.projection_presence",
+              "passed": true,
+              "detail": "memory_enabled=True, projection_present=True"
+            },
+            {
+              "name": "context.memory_budget",
+              "passed": true,
+              "detail": "projection is within the configured independent memory budget"
+            },
+            {
+              "name": "context.memory_untrusted_block",
+              "passed": true,
+              "detail": "memory is a separately delimited lower-authority user-data block"
+            },
+            {
+              "name": "context.memory_rag_separation",
+              "passed": true,
+              "detail": "memory and RAG remain separate context blocks"
+            },
+            {
+              "name": "context.production_stage_order",
+              "passed": true,
+              "detail": "production recall, context, runtime, and session path emitted in order"
+            },
+            {
+              "name": "context.session_commit",
+              "passed": true,
+              "detail": "successful production run committed only the transcript turn, not memory context"
+            },
+            {
+              "name": "context.projected_labels",
+              "passed": true,
+              "detail": "expected (), observed ()"
+            }
+          ]
+        },
+        "answer_utilization": {
+          "output": "No active temporary memory remains after expiry.",
+          "direct_answer_predicate_pass": true,
+          "answer_utilization_predicate_pass": null,
+          "citation_separation_pass": null,
+          "passed": true,
+          "checks": [
+            {
+              "name": "answer.non_empty",
+              "passed": true,
+              "detail": "answer is non-empty"
+            },
+            {
+              "name": "answer.exact",
+              "passed": true,
+              "detail": "expected 'No active temporary memory remains after expiry.', observed 'No active temporary memory remains after expiry.'"
+            },
+            {
+              "name": "answer.contains_all",
+              "passed": true,
+              "detail": "all required fragments found"
+            },
+            {
+              "name": "answer.absent_all",
+              "passed": true,
+              "detail": "no forbidden fragments found"
+            },
+            {
+              "name": "answer.fixture_consumed",
+              "passed": true,
+              "detail": "scripted answer requests observed=1"
+            }
+          ]
+        }
+      },
+      "error": null
+    },
+    {
+      "case_id": "forget-removes-memory-payload",
+      "passed": true,
+      "run_id": "phase8-forget-removes-memory-payload",
+      "stage_event_types": [
+        "run_started",
+        "memory_recall_started",
+        "memory_recall_completed",
+        "context_assembled",
+        "model_request_started",
+        "model_request_completed",
+        "run_completed"
+      ],
+      "stages": {
+        "write_admission": {
+          "candidate_count": 1,
+          "expected_admitted_count": 1,
+          "actual_admitted_count": 1,
+          "policy_denied_count": 0,
+          "false_admission_count": 0,
+          "false_admission_rate": null,
+          "passed": true,
+          "checks": [
+            {
+              "name": "admission.expected_write",
+              "passed": true,
+              "detail": "expected durable write=True, observed=True"
+            },
+            {
+              "name": "admission.false_admission",
+              "passed": true,
+              "detail": "observed 0 false durable writes"
+            }
+          ]
+        },
+        "recall_ranking": [
+          {
+            "query": "Which language should code review comments use?",
+            "candidate_count": 0,
+            "recalled_labels": [],
+            "recall_at_k": null,
+            "precision_at_k": null,
+            "scope_leakage_count": 0,
+            "scope_control_count": 0,
+            "scope_leakage_rate": null,
+            "stale_or_forgotten_recall_count": 0,
+            "stale_or_forgotten_expected_count": 1,
+            "stale_or_forgotten_recall_rate": 0.0,
+            "harmful_over_retrieval_count": 0,
+            "harmful_expected_count": 0,
+            "harmful_over_retrieval_rate": null,
+            "correction_compliance": null,
+            "applicable": true,
+            "no_result": true,
+            "expected_no_result": true,
+            "no_result_correct": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "recall.no_result",
+                "passed": true,
+                "detail": "expected no_result=True, observed=True"
+              },
+              {
+                "name": "recall.selected_labels",
+                "passed": true,
+                "detail": "expected (), observed ()"
+              },
+              {
+                "name": "recall.recall_at_k",
+                "passed": true,
+                "detail": "not applicable: no relevant-result denominator"
+              },
+              {
+                "name": "recall.precision_at_k",
+                "passed": true,
+                "detail": "not applicable: no returned-result denominator"
+              },
+              {
+                "name": "recall.stale_or_forgotten",
+                "passed": true,
+                "detail": "stale/forgotten matches=0"
+              }
+            ]
+          }
+        ],
+        "context_selection": {
+          "memory_enabled": true,
+          "projection_present": true,
+          "memory_context_characters": 0,
+          "memory_context_count": 0,
+          "recalled_count": 0,
+          "omitted_count": 0,
+          "projected_labels": [],
+          "passed": true,
+          "checks": [
+            {
+              "name": "context.projection_presence",
+              "passed": true,
+              "detail": "memory_enabled=True, projection_present=True"
+            },
+            {
+              "name": "context.memory_budget",
+              "passed": true,
+              "detail": "projection is within the configured independent memory budget"
+            },
+            {
+              "name": "context.memory_untrusted_block",
+              "passed": true,
+              "detail": "memory is a separately delimited lower-authority user-data block"
+            },
+            {
+              "name": "context.memory_rag_separation",
+              "passed": true,
+              "detail": "memory and RAG remain separate context blocks"
+            },
+            {
+              "name": "context.production_stage_order",
+              "passed": true,
+              "detail": "production recall, context, runtime, and session path emitted in order"
+            },
+            {
+              "name": "context.session_commit",
+              "passed": true,
+              "detail": "successful production run committed only the transcript turn, not memory context"
+            },
+            {
+              "name": "context.projected_labels",
+              "passed": true,
+              "detail": "expected (), observed ()"
+            }
+          ]
+        },
+        "answer_utilization": {
+          "output": "The forgotten review-language memory is not available.",
+          "direct_answer_predicate_pass": true,
+          "answer_utilization_predicate_pass": true,
+          "citation_separation_pass": null,
+          "passed": true,
+          "checks": [
+            {
+              "name": "answer.non_empty",
+              "passed": true,
+              "detail": "answer is non-empty"
+            },
+            {
+              "name": "answer.exact",
+              "passed": true,
+              "detail": "expected 'The forgotten review-language memory is not available.', observed 'The forgotten review-language memory is not available.'"
+            },
+            {
+              "name": "answer.contains_all",
+              "passed": true,
+              "detail": "all required fragments found"
+            },
+            {
+              "name": "answer.absent_all",
+              "passed": true,
+              "detail": "no forbidden fragments found"
+            },
+            {
+              "name": "answer.memory_utilization",
+              "passed": true,
+              "detail": "memory labels available/blocked as expected"
+            },
+            {
+              "name": "answer.fixture_consumed",
+              "passed": true,
+              "detail": "scripted answer requests observed=1"
+            }
+          ]
+        }
+      },
+      "error": null
+    },
+    {
+      "case_id": "scope-isolation",
+      "passed": true,
+      "run_id": "phase8-scope-isolation",
+      "stage_event_types": [
+        "run_started",
+        "memory_recall_started",
+        "memory_recall_completed",
+        "context_assembled",
+        "model_request_started",
+        "model_request_completed",
+        "run_completed"
+      ],
+      "stages": {
+        "write_admission": {
+          "candidate_count": 2,
+          "expected_admitted_count": 2,
+          "actual_admitted_count": 2,
+          "policy_denied_count": 0,
+          "false_admission_count": 0,
+          "false_admission_rate": null,
+          "passed": true,
+          "checks": [
+            {
+              "name": "admission.expected_write",
+              "passed": true,
+              "detail": "expected durable write=True, observed=True"
+            },
+            {
+              "name": "admission.expected_write",
+              "passed": true,
+              "detail": "expected durable write=True, observed=True"
+            },
+            {
+              "name": "admission.false_admission",
+              "passed": true,
+              "detail": "observed 0 false durable writes"
+            }
+          ]
+        },
+        "recall_ranking": [
+          {
+            "query": "What concise engineering language preference applies?",
+            "candidate_count": 1,
+            "recalled_labels": [
+              "local_preference"
+            ],
+            "recall_at_k": 1.0,
+            "precision_at_k": 1.0,
+            "scope_leakage_count": 0,
+            "scope_control_count": 1,
+            "scope_leakage_rate": 0.0,
+            "stale_or_forgotten_recall_count": 0,
+            "stale_or_forgotten_expected_count": 0,
+            "stale_or_forgotten_recall_rate": null,
+            "harmful_over_retrieval_count": 0,
+            "harmful_expected_count": 0,
+            "harmful_over_retrieval_rate": null,
+            "correction_compliance": null,
+            "applicable": true,
+            "no_result": false,
+            "expected_no_result": false,
+            "no_result_correct": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "recall.no_result",
+                "passed": true,
+                "detail": "expected no_result=False, observed=False"
+              },
+              {
+                "name": "recall.selected_labels",
+                "passed": true,
+                "detail": "expected ('local_preference',), observed ('local_preference',)"
+              },
+              {
+                "name": "recall.recall_at_k",
+                "passed": true,
+                "detail": "observed 1.000000, minimum 1.000000"
+              },
+              {
+                "name": "recall.precision_at_k",
+                "passed": true,
+                "detail": "observed 1.000000, minimum 1.000000"
+              },
+              {
+                "name": "recall.scope_isolation",
+                "passed": true,
+                "detail": "foreign matches=0"
+              }
+            ]
+          }
+        ],
+        "context_selection": {
+          "memory_enabled": true,
+          "projection_present": true,
+          "memory_context_characters": 616,
+          "memory_context_count": 1,
+          "recalled_count": 1,
+          "omitted_count": 0,
+          "projected_labels": [
+            "local_preference"
+          ],
+          "passed": true,
+          "checks": [
+            {
+              "name": "context.projection_presence",
+              "passed": true,
+              "detail": "memory_enabled=True, projection_present=True"
+            },
+            {
+              "name": "context.memory_budget",
+              "passed": true,
+              "detail": "projection is within the configured independent memory budget"
+            },
+            {
+              "name": "context.memory_untrusted_block",
+              "passed": true,
+              "detail": "memory is a separately delimited lower-authority user-data block"
+            },
+            {
+              "name": "context.memory_rag_separation",
+              "passed": true,
+              "detail": "memory and RAG remain separate context blocks"
+            },
+            {
+              "name": "context.production_stage_order",
+              "passed": true,
+              "detail": "production recall, context, runtime, and session path emitted in order"
+            },
+            {
+              "name": "context.session_commit",
+              "passed": true,
+              "detail": "successful production run committed only the transcript turn, not memory context"
+            },
+            {
+              "name": "context.projected_labels",
+              "passed": true,
+              "detail": "expected ('local_preference',), observed ('local_preference',)"
+            }
+          ]
+        },
+        "answer_utilization": {
+          "output": "Use concise Go explanations for this user.",
+          "direct_answer_predicate_pass": true,
+          "answer_utilization_predicate_pass": true,
+          "citation_separation_pass": null,
+          "passed": true,
+          "checks": [
+            {
+              "name": "answer.non_empty",
+              "passed": true,
+              "detail": "answer is non-empty"
+            },
+            {
+              "name": "answer.exact",
+              "passed": true,
+              "detail": "expected 'Use concise Go explanations for this user.', observed 'Use concise Go explanations for this user.'"
+            },
+            {
+              "name": "answer.contains_all",
+              "passed": true,
+              "detail": "all required fragments found"
+            },
+            {
+              "name": "answer.absent_all",
+              "passed": true,
+              "detail": "no forbidden fragments found"
+            },
+            {
+              "name": "answer.memory_utilization",
+              "passed": true,
+              "detail": "memory labels available/blocked as expected"
+            },
+            {
+              "name": "answer.fixture_consumed",
+              "passed": true,
+              "detail": "scripted answer requests observed=1"
+            }
+          ]
+        }
+      },
+      "error": null
+    },
+    {
+      "case_id": "secret-and-sensitive-deny",
+      "passed": true,
+      "run_id": "phase8-secret-and-sensitive-deny",
+      "stage_event_types": [
+        "run_started",
+        "memory_recall_started",
+        "memory_recall_completed",
+        "context_assembled",
+        "model_request_started",
+        "model_request_completed",
+        "run_completed"
+      ],
+      "stages": {
+        "write_admission": {
+          "candidate_count": 2,
+          "expected_admitted_count": 0,
+          "actual_admitted_count": 0,
+          "policy_denied_count": 2,
+          "false_admission_count": 0,
+          "false_admission_rate": 0.0,
+          "passed": true,
+          "checks": [
+            {
+              "name": "admission.expected_write",
+              "passed": true,
+              "detail": "expected durable write=False, observed=False"
+            },
+            {
+              "name": "admission.expected_write",
+              "passed": true,
+              "detail": "expected durable write=False, observed=False"
+            },
+            {
+              "name": "admission.false_admission",
+              "passed": true,
+              "detail": "observed 0 false durable writes"
+            }
+          ]
+        },
+        "recall_ranking": [
+          {
+            "query": "What medical api key fact is saved?",
+            "candidate_count": 0,
+            "recalled_labels": [],
+            "recall_at_k": null,
+            "precision_at_k": null,
+            "scope_leakage_count": 0,
+            "scope_control_count": 0,
+            "scope_leakage_rate": null,
+            "stale_or_forgotten_recall_count": 0,
+            "stale_or_forgotten_expected_count": 0,
+            "stale_or_forgotten_recall_rate": null,
+            "harmful_over_retrieval_count": 0,
+            "harmful_expected_count": 0,
+            "harmful_over_retrieval_rate": null,
+            "correction_compliance": null,
+            "applicable": true,
+            "no_result": true,
+            "expected_no_result": true,
+            "no_result_correct": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "recall.no_result",
+                "passed": true,
+                "detail": "expected no_result=True, observed=True"
+              },
+              {
+                "name": "recall.selected_labels",
+                "passed": true,
+                "detail": "expected (), observed ()"
+              },
+              {
+                "name": "recall.recall_at_k",
+                "passed": true,
+                "detail": "not applicable: no relevant-result denominator"
+              },
+              {
+                "name": "recall.precision_at_k",
+                "passed": true,
+                "detail": "not applicable: no returned-result denominator"
+              }
+            ]
+          }
+        ],
+        "context_selection": {
+          "memory_enabled": true,
+          "projection_present": true,
+          "memory_context_characters": 0,
+          "memory_context_count": 0,
+          "recalled_count": 0,
+          "omitted_count": 0,
+          "projected_labels": [],
+          "passed": true,
+          "checks": [
+            {
+              "name": "context.projection_presence",
+              "passed": true,
+              "detail": "memory_enabled=True, projection_present=True"
+            },
+            {
+              "name": "context.memory_budget",
+              "passed": true,
+              "detail": "projection is within the configured independent memory budget"
+            },
+            {
+              "name": "context.memory_untrusted_block",
+              "passed": true,
+              "detail": "memory is a separately delimited lower-authority user-data block"
+            },
+            {
+              "name": "context.memory_rag_separation",
+              "passed": true,
+              "detail": "memory and RAG remain separate context blocks"
+            },
+            {
+              "name": "context.production_stage_order",
+              "passed": true,
+              "detail": "production recall, context, runtime, and session path emitted in order"
+            },
+            {
+              "name": "context.session_commit",
+              "passed": true,
+              "detail": "successful production run committed only the transcript turn, not memory context"
+            },
+            {
+              "name": "context.projected_labels",
+              "passed": true,
+              "detail": "expected (), observed ()"
+            }
+          ]
+        },
+        "answer_utilization": {
+          "output": "Secret and sensitive candidates were denied before durable storage.",
+          "direct_answer_predicate_pass": true,
+          "answer_utilization_predicate_pass": true,
+          "citation_separation_pass": null,
+          "passed": true,
+          "checks": [
+            {
+              "name": "answer.non_empty",
+              "passed": true,
+              "detail": "answer is non-empty"
+            },
+            {
+              "name": "answer.exact",
+              "passed": true,
+              "detail": "expected 'Secret and sensitive candidates were denied before durable storage.', observed 'Secret and sensitive candidates were denied before durable storage.'"
+            },
+            {
+              "name": "answer.contains_all",
+              "passed": true,
+              "detail": "all required fragments found"
+            },
+            {
+              "name": "answer.absent_all",
+              "passed": true,
+              "detail": "no forbidden fragments found"
+            },
+            {
+              "name": "answer.memory_utilization",
+              "passed": true,
+              "detail": "memory labels available/blocked as expected"
+            },
+            {
+              "name": "answer.fixture_consumed",
+              "passed": true,
+              "detail": "scripted answer requests observed=1"
+            }
+          ]
+        }
+      },
+      "error": null
+    },
+    {
+      "case_id": "irrelevant-query-no-result",
+      "passed": true,
+      "run_id": "phase8-irrelevant-query-no-result",
+      "stage_event_types": [
+        "run_started",
+        "memory_recall_started",
+        "memory_recall_completed",
+        "context_assembled",
+        "model_request_started",
+        "model_request_completed",
+        "run_completed"
+      ],
+      "stages": {
+        "write_admission": {
+          "candidate_count": 1,
+          "expected_admitted_count": 1,
+          "actual_admitted_count": 1,
+          "policy_denied_count": 0,
+          "false_admission_count": 0,
+          "false_admission_rate": null,
+          "passed": true,
+          "checks": [
+            {
+              "name": "admission.expected_write",
+              "passed": true,
+              "detail": "expected durable write=True, observed=True"
+            },
+            {
+              "name": "admission.false_admission",
+              "passed": true,
+              "detail": "observed 0 false durable writes"
+            }
+          ]
+        },
+        "recall_ranking": [
+          {
+            "query": "xylophone nebula",
+            "candidate_count": 1,
+            "recalled_labels": [],
+            "recall_at_k": null,
+            "precision_at_k": null,
+            "scope_leakage_count": 0,
+            "scope_control_count": 0,
+            "scope_leakage_rate": null,
+            "stale_or_forgotten_recall_count": 0,
+            "stale_or_forgotten_expected_count": 0,
+            "stale_or_forgotten_recall_rate": null,
+            "harmful_over_retrieval_count": 0,
+            "harmful_expected_count": 0,
+            "harmful_over_retrieval_rate": null,
+            "correction_compliance": null,
+            "applicable": true,
+            "no_result": true,
+            "expected_no_result": true,
+            "no_result_correct": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "recall.no_result",
+                "passed": true,
+                "detail": "expected no_result=True, observed=True"
+              },
+              {
+                "name": "recall.selected_labels",
+                "passed": true,
+                "detail": "expected (), observed ()"
+              },
+              {
+                "name": "recall.recall_at_k",
+                "passed": true,
+                "detail": "not applicable: no relevant-result denominator"
+              },
+              {
+                "name": "recall.precision_at_k",
+                "passed": true,
+                "detail": "not applicable: no returned-result denominator"
+              }
+            ]
+          }
+        ],
+        "context_selection": {
+          "memory_enabled": true,
+          "projection_present": true,
+          "memory_context_characters": 0,
+          "memory_context_count": 0,
+          "recalled_count": 0,
+          "omitted_count": 1,
+          "projected_labels": [],
+          "passed": true,
+          "checks": [
+            {
+              "name": "context.projection_presence",
+              "passed": true,
+              "detail": "memory_enabled=True, projection_present=True"
+            },
+            {
+              "name": "context.memory_budget",
+              "passed": true,
+              "detail": "projection is within the configured independent memory budget"
+            },
+            {
+              "name": "context.memory_untrusted_block",
+              "passed": true,
+              "detail": "memory is a separately delimited lower-authority user-data block"
+            },
+            {
+              "name": "context.memory_rag_separation",
+              "passed": true,
+              "detail": "memory and RAG remain separate context blocks"
+            },
+            {
+              "name": "context.production_stage_order",
+              "passed": true,
+              "detail": "production recall, context, runtime, and session path emitted in order"
+            },
+            {
+              "name": "context.session_commit",
+              "passed": true,
+              "detail": "successful production run committed only the transcript turn, not memory context"
+            },
+            {
+              "name": "context.projected_labels",
+              "passed": true,
+              "detail": "expected (), observed ()"
+            }
+          ]
+        },
+        "answer_utilization": {
+          "output": "There is no relevant saved memory for this query.",
+          "direct_answer_predicate_pass": true,
+          "answer_utilization_predicate_pass": null,
+          "citation_separation_pass": null,
+          "passed": true,
+          "checks": [
+            {
+              "name": "answer.non_empty",
+              "passed": true,
+              "detail": "answer is non-empty"
+            },
+            {
+              "name": "answer.exact",
+              "passed": true,
+              "detail": "expected 'There is no relevant saved memory for this query.', observed 'There is no relevant saved memory for this query.'"
+            },
+            {
+              "name": "answer.contains_all",
+              "passed": true,
+              "detail": "all required fragments found"
+            },
+            {
+              "name": "answer.absent_all",
+              "passed": true,
+              "detail": "no forbidden fragments found"
+            },
+            {
+              "name": "answer.fixture_consumed",
+              "passed": true,
+              "detail": "scripted answer requests observed=1"
+            }
+          ]
+        }
+      },
+      "error": null
+    },
+    {
+      "case_id": "harmful-memory-over-retrieval",
+      "passed": true,
+      "run_id": "phase8-harmful-memory-over-retrieval",
+      "stage_event_types": [
+        "run_started",
+        "memory_recall_started",
+        "memory_recall_completed",
+        "context_assembled",
+        "model_request_started",
+        "model_request_completed",
+        "run_completed"
+      ],
+      "stages": {
+        "write_admission": {
+          "candidate_count": 2,
+          "expected_admitted_count": 2,
+          "actual_admitted_count": 2,
+          "policy_denied_count": 0,
+          "false_admission_count": 0,
+          "false_admission_rate": null,
+          "passed": true,
+          "checks": [
+            {
+              "name": "admission.expected_write",
+              "passed": true,
+              "detail": "expected durable write=True, observed=True"
+            },
+            {
+              "name": "admission.expected_write",
+              "passed": true,
+              "detail": "expected durable write=True, observed=True"
+            },
+            {
+              "name": "admission.false_admission",
+              "passed": true,
+              "detail": "observed 0 false durable writes"
+            }
+          ]
+        },
+        "recall_ranking": [
+          {
+            "query": "What concise deployment answer style should I use?",
+            "candidate_count": 2,
+            "recalled_labels": [
+              "helpful_preference"
+            ],
+            "recall_at_k": 1.0,
+            "precision_at_k": 1.0,
+            "scope_leakage_count": 0,
+            "scope_control_count": 0,
+            "scope_leakage_rate": null,
+            "stale_or_forgotten_recall_count": 0,
+            "stale_or_forgotten_expected_count": 0,
+            "stale_or_forgotten_recall_rate": null,
+            "harmful_over_retrieval_count": 0,
+            "harmful_expected_count": 1,
+            "harmful_over_retrieval_rate": 0.0,
+            "correction_compliance": null,
+            "applicable": true,
+            "no_result": false,
+            "expected_no_result": false,
+            "no_result_correct": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "recall.no_result",
+                "passed": true,
+                "detail": "expected no_result=False, observed=False"
+              },
+              {
+                "name": "recall.selected_labels",
+                "passed": true,
+                "detail": "expected ('helpful_preference',), observed ('helpful_preference',)"
+              },
+              {
+                "name": "recall.recall_at_k",
+                "passed": true,
+                "detail": "observed 1.000000, minimum 1.000000"
+              },
+              {
+                "name": "recall.precision_at_k",
+                "passed": true,
+                "detail": "observed 1.000000, minimum 1.000000"
+              },
+              {
+                "name": "recall.harmful_over_retrieval",
+                "passed": true,
+                "detail": "harmful matches=0"
+              }
+            ]
+          }
+        ],
+        "context_selection": {
+          "memory_enabled": true,
+          "projection_present": true,
+          "memory_context_characters": 643,
+          "memory_context_count": 1,
+          "recalled_count": 1,
+          "omitted_count": 1,
+          "projected_labels": [
+            "helpful_preference"
+          ],
+          "passed": true,
+          "checks": [
+            {
+              "name": "context.projection_presence",
+              "passed": true,
+              "detail": "memory_enabled=True, projection_present=True"
+            },
+            {
+              "name": "context.memory_budget",
+              "passed": true,
+              "detail": "projection is within the configured independent memory budget"
+            },
+            {
+              "name": "context.memory_untrusted_block",
+              "passed": true,
+              "detail": "memory is a separately delimited lower-authority user-data block"
+            },
+            {
+              "name": "context.memory_rag_separation",
+              "passed": true,
+              "detail": "memory and RAG remain separate context blocks"
+            },
+            {
+              "name": "context.production_stage_order",
+              "passed": true,
+              "detail": "production recall, context, runtime, and session path emitted in order"
+            },
+            {
+              "name": "context.session_commit",
+              "passed": true,
+              "detail": "successful production run committed only the transcript turn, not memory context"
+            },
+            {
+              "name": "context.projected_labels",
+              "passed": true,
+              "detail": "expected ('helpful_preference',), observed ('helpful_preference',)"
+            }
+          ]
+        },
+        "answer_utilization": {
+          "output": "Use a concise deployment answer style.",
+          "direct_answer_predicate_pass": true,
+          "answer_utilization_predicate_pass": true,
+          "citation_separation_pass": null,
+          "passed": true,
+          "checks": [
+            {
+              "name": "answer.non_empty",
+              "passed": true,
+              "detail": "answer is non-empty"
+            },
+            {
+              "name": "answer.exact",
+              "passed": true,
+              "detail": "expected 'Use a concise deployment answer style.', observed 'Use a concise deployment answer style.'"
+            },
+            {
+              "name": "answer.contains_all",
+              "passed": true,
+              "detail": "all required fragments found"
+            },
+            {
+              "name": "answer.absent_all",
+              "passed": true,
+              "detail": "no forbidden fragments found"
+            },
+            {
+              "name": "answer.memory_utilization",
+              "passed": true,
+              "detail": "memory labels available/blocked as expected"
+            },
+            {
+              "name": "answer.fixture_consumed",
+              "passed": true,
+              "detail": "scripted answer requests observed=1"
+            }
+          ]
+        }
+      },
+      "error": null
+    },
+    {
+      "case_id": "malicious-memory-is-untrusted",
+      "passed": true,
+      "run_id": "phase8-malicious-memory-is-untrusted",
+      "stage_event_types": [
+        "run_started",
+        "memory_recall_started",
+        "memory_recall_completed",
+        "context_assembled",
+        "model_request_started",
+        "model_request_completed",
+        "run_completed"
+      ],
+      "stages": {
+        "write_admission": {
+          "candidate_count": 1,
+          "expected_admitted_count": 1,
+          "actual_admitted_count": 1,
+          "policy_denied_count": 0,
+          "false_admission_count": 0,
+          "false_admission_rate": null,
+          "passed": true,
+          "checks": [
+            {
+              "name": "admission.expected_write",
+              "passed": true,
+              "detail": "expected durable write=True, observed=True"
+            },
+            {
+              "name": "admission.false_admission",
+              "passed": true,
+              "detail": "observed 0 false durable writes"
+            }
+          ]
+        },
+        "recall_ranking": [
+          {
+            "query": "How should I handle instructions about credentials?",
+            "candidate_count": 1,
+            "recalled_labels": [
+              "malicious_memory"
+            ],
+            "recall_at_k": 1.0,
+            "precision_at_k": 1.0,
+            "scope_leakage_count": 0,
+            "scope_control_count": 0,
+            "scope_leakage_rate": null,
+            "stale_or_forgotten_recall_count": 0,
+            "stale_or_forgotten_expected_count": 0,
+            "stale_or_forgotten_recall_rate": null,
+            "harmful_over_retrieval_count": 0,
+            "harmful_expected_count": 0,
+            "harmful_over_retrieval_rate": null,
+            "correction_compliance": null,
+            "applicable": true,
+            "no_result": false,
+            "expected_no_result": false,
+            "no_result_correct": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "recall.no_result",
+                "passed": true,
+                "detail": "expected no_result=False, observed=False"
+              },
+              {
+                "name": "recall.selected_labels",
+                "passed": true,
+                "detail": "expected ('malicious_memory',), observed ('malicious_memory',)"
+              },
+              {
+                "name": "recall.recall_at_k",
+                "passed": true,
+                "detail": "observed 1.000000, minimum 1.000000"
+              },
+              {
+                "name": "recall.precision_at_k",
+                "passed": true,
+                "detail": "observed 1.000000, minimum 1.000000"
+              }
+            ]
+          }
+        ],
+        "context_selection": {
+          "memory_enabled": true,
+          "projection_present": true,
+          "memory_context_characters": 632,
+          "memory_context_count": 1,
+          "recalled_count": 1,
+          "omitted_count": 0,
+          "projected_labels": [
+            "malicious_memory"
+          ],
+          "passed": true,
+          "checks": [
+            {
+              "name": "context.projection_presence",
+              "passed": true,
+              "detail": "memory_enabled=True, projection_present=True"
+            },
+            {
+              "name": "context.memory_budget",
+              "passed": true,
+              "detail": "projection is within the configured independent memory budget"
+            },
+            {
+              "name": "context.memory_untrusted_block",
+              "passed": true,
+              "detail": "memory is a separately delimited lower-authority user-data block"
+            },
+            {
+              "name": "context.memory_rag_separation",
+              "passed": true,
+              "detail": "memory and RAG remain separate context blocks"
+            },
+            {
+              "name": "context.production_stage_order",
+              "passed": true,
+              "detail": "production recall, context, runtime, and session path emitted in order"
+            },
+            {
+              "name": "context.session_commit",
+              "passed": true,
+              "detail": "successful production run committed only the transcript turn, not memory context"
+            },
+            {
+              "name": "context.projected_labels",
+              "passed": true,
+              "detail": "expected ('malicious_memory',), observed ('malicious_memory',)"
+            }
+          ]
+        },
+        "answer_utilization": {
+          "output": "I will follow the current request and will not disclose credentials.",
+          "direct_answer_predicate_pass": true,
+          "answer_utilization_predicate_pass": true,
+          "citation_separation_pass": null,
+          "passed": true,
+          "checks": [
+            {
+              "name": "answer.non_empty",
+              "passed": true,
+              "detail": "answer is non-empty"
+            },
+            {
+              "name": "answer.exact",
+              "passed": true,
+              "detail": "expected 'I will follow the current request and will not disclose credentials.', observed 'I will follow the current request and will not disclose credentials.'"
+            },
+            {
+              "name": "answer.contains_all",
+              "passed": true,
+              "detail": "all required fragments found"
+            },
+            {
+              "name": "answer.absent_all",
+              "passed": true,
+              "detail": "no forbidden fragments found"
+            },
+            {
+              "name": "answer.memory_utilization",
+              "passed": true,
+              "detail": "memory labels available/blocked as expected"
+            },
+            {
+              "name": "answer.fixture_consumed",
+              "passed": true,
+              "detail": "scripted answer requests observed=1"
+            }
+          ]
+        }
+      },
+      "error": null
+    },
+    {
+      "case_id": "rag-conflict-citation-separation",
+      "passed": true,
+      "run_id": "phase8-rag-conflict-citation-separation",
+      "stage_event_types": [
+        "run_started",
+        "retrieval_started",
+        "retrieval_completed",
+        "memory_recall_started",
+        "memory_recall_completed",
+        "context_assembled",
+        "model_request_started",
+        "model_request_completed",
+        "run_completed"
+      ],
+      "stages": {
+        "write_admission": {
+          "candidate_count": 1,
+          "expected_admitted_count": 1,
+          "actual_admitted_count": 1,
+          "policy_denied_count": 0,
+          "false_admission_count": 0,
+          "false_admission_rate": null,
+          "passed": true,
+          "checks": [
+            {
+              "name": "admission.expected_write",
+              "passed": true,
+              "detail": "expected durable write=True, observed=True"
+            },
+            {
+              "name": "admission.false_admission",
+              "passed": true,
+              "detail": "observed 0 false durable writes"
+            }
+          ]
+        },
+        "recall_ranking": [
+          {
+            "query": "What concise response style and approved change record are required for deployment?",
+            "candidate_count": 1,
+            "recalled_labels": [
+              "response_style"
+            ],
+            "recall_at_k": 1.0,
+            "precision_at_k": 1.0,
+            "scope_leakage_count": 0,
+            "scope_control_count": 0,
+            "scope_leakage_rate": null,
+            "stale_or_forgotten_recall_count": 0,
+            "stale_or_forgotten_expected_count": 0,
+            "stale_or_forgotten_recall_rate": null,
+            "harmful_over_retrieval_count": 0,
+            "harmful_expected_count": 0,
+            "harmful_over_retrieval_rate": null,
+            "correction_compliance": null,
+            "applicable": true,
+            "no_result": false,
+            "expected_no_result": false,
+            "no_result_correct": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "recall.no_result",
+                "passed": true,
+                "detail": "expected no_result=False, observed=False"
+              },
+              {
+                "name": "recall.selected_labels",
+                "passed": true,
+                "detail": "expected ('response_style',), observed ('response_style',)"
+              },
+              {
+                "name": "recall.recall_at_k",
+                "passed": true,
+                "detail": "observed 1.000000, minimum 1.000000"
+              },
+              {
+                "name": "recall.precision_at_k",
+                "passed": true,
+                "detail": "observed 1.000000, minimum 1.000000"
+              }
+            ]
+          }
+        ],
+        "context_selection": {
+          "memory_enabled": true,
+          "projection_present": true,
+          "memory_context_characters": 621,
+          "memory_context_count": 1,
+          "recalled_count": 1,
+          "omitted_count": 0,
+          "projected_labels": [
+            "response_style"
+          ],
+          "passed": true,
+          "checks": [
+            {
+              "name": "context.projection_presence",
+              "passed": true,
+              "detail": "memory_enabled=True, projection_present=True"
+            },
+            {
+              "name": "context.memory_budget",
+              "passed": true,
+              "detail": "projection is within the configured independent memory budget"
+            },
+            {
+              "name": "context.memory_untrusted_block",
+              "passed": true,
+              "detail": "memory is a separately delimited lower-authority user-data block"
+            },
+            {
+              "name": "context.memory_rag_separation",
+              "passed": true,
+              "detail": "memory and RAG remain separate context blocks"
+            },
+            {
+              "name": "context.production_stage_order",
+              "passed": true,
+              "detail": "production recall, context, runtime, and session path emitted in order"
+            },
+            {
+              "name": "context.session_commit",
+              "passed": true,
+              "detail": "successful production run committed only the transcript turn, not memory context"
+            },
+            {
+              "name": "context.projected_labels",
+              "passed": true,
+              "detail": "expected ('response_style',), observed ('response_style',)"
+            }
+          ]
+        },
+        "answer_utilization": {
+          "output": "Use concise responses. Deployment requires an approved change record [R1].",
+          "direct_answer_predicate_pass": true,
+          "answer_utilization_predicate_pass": true,
+          "citation_separation_pass": true,
+          "passed": true,
+          "checks": [
+            {
+              "name": "answer.non_empty",
+              "passed": true,
+              "detail": "answer is non-empty"
+            },
+            {
+              "name": "answer.exact",
+              "passed": true,
+              "detail": "expected 'Use concise responses. Deployment requires an approved change record [R1].', observed 'Use concise responses. Deployment requires an approved change record [R1].'"
+            },
+            {
+              "name": "answer.contains_all",
+              "passed": true,
+              "detail": "all required fragments found"
+            },
+            {
+              "name": "answer.absent_all",
+              "passed": true,
+              "detail": "no forbidden fragments found"
+            },
+            {
+              "name": "answer.memory_utilization",
+              "passed": true,
+              "detail": "memory labels available/blocked as expected"
+            },
+            {
+              "name": "answer.citation_separation",
+              "passed": true,
+              "detail": "expected cited documents=['deployment-policy'], observed=['deployment-policy']"
+            },
+            {
+              "name": "answer.fixture_consumed",
+              "passed": true,
+              "detail": "scripted answer requests observed=1"
+            }
+          ]
+        }
+      },
+      "error": null
+    },
+    {
+      "case_id": "no-memory-regression",
+      "passed": true,
+      "run_id": "phase8-no-memory-regression",
+      "stage_event_types": [
+        "run_started",
+        "context_assembled",
+        "model_request_started",
+        "model_request_completed",
+        "run_completed"
+      ],
+      "stages": {
+        "write_admission": {
+          "candidate_count": 0,
+          "expected_admitted_count": 0,
+          "actual_admitted_count": 0,
+          "policy_denied_count": 0,
+          "false_admission_count": 0,
+          "false_admission_rate": null,
+          "passed": true,
+          "checks": [
+            {
+              "name": "admission.false_admission",
+              "passed": true,
+              "detail": "observed 0 false durable writes"
+            }
+          ]
+        },
+        "recall_ranking": [
+          {
+            "query": "What remains in the memory-disabled context path?",
+            "candidate_count": 0,
+            "recalled_labels": [],
+            "recall_at_k": null,
+            "precision_at_k": null,
+            "scope_leakage_count": 0,
+            "scope_control_count": 0,
+            "scope_leakage_rate": null,
+            "stale_or_forgotten_recall_count": 0,
+            "stale_or_forgotten_expected_count": 0,
+            "stale_or_forgotten_recall_rate": null,
+            "harmful_over_retrieval_count": 0,
+            "harmful_expected_count": 0,
+            "harmful_over_retrieval_rate": null,
+            "correction_compliance": null,
+            "applicable": false,
+            "no_result": true,
+            "expected_no_result": true,
+            "no_result_correct": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "recall.no_result",
+                "passed": true,
+                "detail": "expected no_result=True, observed=True"
+              },
+              {
+                "name": "recall.selected_labels",
+                "passed": true,
+                "detail": "expected (), observed ()"
+              },
+              {
+                "name": "recall.recall_at_k",
+                "passed": true,
+                "detail": "not applicable: no relevant-result denominator"
+              },
+              {
+                "name": "recall.precision_at_k",
+                "passed": true,
+                "detail": "not applicable: no returned-result denominator"
+              }
+            ]
+          }
+        ],
+        "context_selection": {
+          "memory_enabled": false,
+          "projection_present": false,
+          "memory_context_characters": 0,
+          "memory_context_count": 0,
+          "recalled_count": 0,
+          "omitted_count": 0,
+          "projected_labels": [],
+          "passed": true,
+          "checks": [
+            {
+              "name": "context.projection_presence",
+              "passed": true,
+              "detail": "memory_enabled=False, projection_present=False"
+            },
+            {
+              "name": "context.memory_budget",
+              "passed": true,
+              "detail": "projection is within the configured independent memory budget"
+            },
+            {
+              "name": "context.memory_untrusted_block",
+              "passed": true,
+              "detail": "memory is a separately delimited lower-authority user-data block"
+            },
+            {
+              "name": "context.memory_rag_separation",
+              "passed": true,
+              "detail": "memory and RAG remain separate context blocks"
+            },
+            {
+              "name": "context.production_stage_order",
+              "passed": true,
+              "detail": "production recall, context, runtime, and session path emitted in order"
+            },
+            {
+              "name": "context.session_commit",
+              "passed": true,
+              "detail": "successful production run committed only the transcript turn, not memory context"
+            },
+            {
+              "name": "context.no_memory_regression",
+              "passed": true,
+              "detail": "disabled memory path matches the direct ContextBuilder control"
+            },
+            {
+              "name": "context.no_memory_marker",
+              "passed": true,
+              "detail": "disabled memory path has no memory block"
+            }
+          ]
+        },
+        "answer_utilization": {
+          "output": "The memory-disabled context path remains unchanged.",
+          "direct_answer_predicate_pass": true,
+          "answer_utilization_predicate_pass": null,
+          "citation_separation_pass": null,
+          "passed": true,
+          "checks": [
+            {
+              "name": "answer.non_empty",
+              "passed": true,
+              "detail": "answer is non-empty"
+            },
+            {
+              "name": "answer.exact",
+              "passed": true,
+              "detail": "expected 'The memory-disabled context path remains unchanged.', observed 'The memory-disabled context path remains unchanged.'"
+            },
+            {
+              "name": "answer.contains_all",
+              "passed": true,
+              "detail": "all required fragments found"
+            },
+            {
+              "name": "answer.absent_all",
+              "passed": true,
+              "detail": "no forbidden fragments found"
+            },
+            {
+              "name": "answer.fixture_consumed",
+              "passed": true,
+              "detail": "scripted answer requests observed=1"
+            }
+          ]
+        }
+      },
+      "error": null
+    }
+  ],
+  "architecture_fingerprint": "c6526848b535d327a46ec61357369b3108d604cf163e56bff0d9029cc3d3e6c0",
+  "deterministic_fingerprint": "0d72e27ed8834bc9d43c560a3a894f8b013ebf7ad74d6415e1ecfd2715d120af"
+}

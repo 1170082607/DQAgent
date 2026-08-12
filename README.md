@@ -4,7 +4,7 @@ DQAgent is an engineering-first learning project for building AI Agent capabilit
 from foundational components. Its purpose is to understand the design of production-oriented agent
 systems instead of treating frameworks as black boxes.
 
-**Status:** Pre-alpha. Phase 8 T10 is implemented: DQAgent supports durable bounded sessions,
+**Status:** Pre-alpha. Phase 8 T11 is implemented: DQAgent supports durable bounded sessions,
 explicit local RAG, optional exact-scope read-only memory recall, and explicit source-to-transient-
 candidate extraction with provider-neutral boundaries, citation/memory provenance, and deterministic
 regression evaluations.
@@ -91,6 +91,8 @@ regression evaluations.
   fixtures and a model-assisted strict JSON path that has no mutation tools or store access.
 - Source-derived extraction provenance, independent extraction run IDs, and an explicit pipeline that
   sends every candidate through policy preview and exact digest confirmation.
+- A credential-free Phase 8 memory evaluation suite and deterministic baseline that separately reports
+  admission, ranking, context selection, answer utilization, no-result semantics, and direct predicates.
 - Environment-based configuration with explicit validation.
 - Unit tests, Ruff linting, mypy strict type checking, and GitHub Actions CI.
 
@@ -304,6 +306,8 @@ src/dqagent/memory_service.py Explicit memory management application service
 src/dqagent/memory_store.py Exact-scope transactional memory stores
 src/dqagent/memory_extraction.py Source-to-transient-candidate extraction boundary
 src/dqagent/memory_cli.py Independent model-free memory management CLI
+src/dqagent/memory_evaluation.py Production-path Phase 8 memory evaluation runner and metrics
+src/dqagent/memory_evaluation_cli.py Credential-free Phase 8 memory evaluation CLI
 src/dqagent/workflow.py Deterministic workflow definition and runner
 src/dqagent/checkpoint.py Workflow checkpoint contract and stores
 evaluations/        Versioned cases and committed baseline reports

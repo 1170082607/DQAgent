@@ -283,6 +283,19 @@ meet this phase's objective.
   tool calls, hallucinated provenance, cancellation, deadlines, independent run identity, and
   zero-write failure behavior without using a live provider as a CI gate.
 
+**T11 delivered:**
+
+- [x] Add a versioned, credential-free long-term memory suite and deterministic baseline through the
+  production MemoryService, policy, store, selector, ContextBuilder, and SessionAgentApplication path.
+- [x] Report write admission, recall ranking, context selection, and answer utilization separately,
+  including false admission, Recall@k/Precision@k, scope leakage, stale/forgotten recall, harmful
+  over-retrieval, correction compliance, memory context size, direct predicates, and no-result semantics.
+- [x] Cover confirmed cross-session preference, false inference, request override, correction, expiry,
+  forgetting, scope isolation, sensitive/secret denial, irrelevant and malicious memory, RAG/citation
+  separation, and no-memory regression.
+- [x] Keep deterministic fixtures as the CI gate and document that hashing embeddings and scripted
+  answers prove architecture regression only; no LLM-as-judge or credentialed live gate is required.
+
 ### Phase 9: Coding Agent Harness and Safety
 
 **Status:** Planned

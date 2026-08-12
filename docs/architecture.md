@@ -2,7 +2,7 @@
 
 ## Status
 
-This document describes the implemented Phase 8 T10 architecture. Memory management is available as
+This document describes the implemented Phase 8 T11 architecture. Memory management is available as
 a model-free explicit application service, request-time policy-filtered recall, an optional durable
 session read stage, a bounded context projection, a pure source-to-transient-candidate extraction
 boundary, and independent memory/session CLI composition. Automatic memory writes, hard execution
@@ -41,6 +41,9 @@ Session ID -> SessionAgentApplication -> RunCoordinator -> Retriever
                        +-> SessionStore (full transcript + CAS revision after run success)
 
 Context case -> ContextEvaluationRunner -> production ContextBuilder -> context report
+
+Memory case -> MemoryEvaluationRunner -> MemoryService + MemorySelector + ContextBuilder
+                                      -> SessionAgentApplication + scripted fixtures -> layered report
 
 Memory management request -> dqagent-memory CLI -> MemoryService
                                       |             +-> MemoryPolicy + MemoryConsolidator + MemoryStore
@@ -115,6 +118,12 @@ not a real forecast.
 
 `EvaluationRunner` owns case isolation and behavioral judgment. It consumes final output,
 conversation items, and runtime events; it does not alter runtime control flow or conversation state.
+
+`MemoryEvaluationRunner` is an evaluation coordinator above production execution. It uses a temporary
+SQLite database and production memory/session objects for each case, while replacing only extraction
+and answer generation with deterministic fixtures. It reports admission, ranking, context projection,
+and answer utilization independently. Its no-result metrics use `null` for zero denominators and a
+separate no-result correctness value for empty-result semantics; no LLM judge is involved.
 
 `WorkflowRunner` owns graph traversal, node-boundary commits, conditional selection, bounded branch
 execution, interruption, recovery, and workflow events. `CheckpointStore` owns compare-and-swap
