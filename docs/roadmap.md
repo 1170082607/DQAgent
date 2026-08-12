@@ -270,7 +270,18 @@ meet this phase's objective.
   deadlines, unexpected failures, RAG ordering, untrusted memory projection, CAS behavior, and
   CLI configuration validation.
 
-Model-assisted extraction and automatic memory writes remain later Phase 8 work.
+**T10 delivered:**
+
+- [x] Establish a pure `MemoryExtractor` boundary from one explicitly selected, committed, bounded
+  session turn to transient candidates, with a deterministic fixture path for core behavior and
+  evaluation.
+- [x] Keep model-assisted extraction behind the provider-neutral `LLMClient` with strict JSON/schema
+  limits, source-derived provenance, no tools, no transcript copy, and an independent coordinator run.
+- [x] Preserve deterministic policy, exact preview, and digest confirmation as the only path to a
+  durable write; extraction is not automatic chat behavior and confidence never authorizes storage.
+- [x] Test zero/multiple candidates, malformed and oversized output, prompt injection-shaped source,
+  tool calls, hallucinated provenance, cancellation, deadlines, independent run identity, and
+  zero-write failure behavior without using a live provider as a CI gate.
 
 ### Phase 9: Coding Agent Harness and Safety
 

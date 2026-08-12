@@ -1,5 +1,6 @@
 """Transactional storage contract for policy-governed long-term memory."""
 
+import json
 import math
 import sqlite3
 from contextlib import closing
@@ -32,6 +33,7 @@ from dqagent.memory import (
 )
 
 MEMORY_DATABASE_SCHEMA_VERSION = 1
+_PROVENANCE_IDENTITY_PREFIX = "dqagent-provenance-v1:"
 
 _LIFECYCLE_STABLE_FIELDS = tuple(
     field.name
@@ -478,7 +480,7 @@ def _record_to_sqlite_values(record: MemoryRecord) -> tuple[object, ...]:
         record.sensitivity.value,
         provenance.source_type.value,
         provenance.source_item_digest,
-        provenance.extractor_identity,
+        _stored_extractor_identity(provenance),
         provenance.extracted_at.isoformat(),
         provenance.source_id,
         provenance.source_revision,
@@ -512,14 +514,19 @@ def _record_from_sqlite_row(row: sqlite3.Row) -> MemoryRecord:
         MemoryScopeKind(_required_str(row, "scope_kind")),
         _required_str(row, "scope_id"),
     )
+    extractor_identity, model_identity, response_identity = _load_extractor_identity(
+        _required_str(row, "extractor_identity")
+    )
     provenance = MemoryProvenance(
         source_type=MemorySourceType(_required_str(row, "source_type")),
         source_item_digest=_required_str(row, "source_item_digest"),
-        extractor_identity=_required_str(row, "extractor_identity"),
+        extractor_identity=extractor_identity,
         extracted_at=_required_datetime(row, "extracted_at"),
         source_id=_optional_str(row, "source_id"),
         source_revision=_optional_int(row, "source_revision"),
         run_id=_optional_str(row, "run_id"),
+        model_identity=model_identity,
+        response_identity=response_identity,
     )
     return MemoryRecord(
         memory_id=_required_str(row, "memory_id"),
@@ -605,6 +612,45 @@ def _required_datetime(row: sqlite3.Row, name: str) -> datetime:
 def _optional_datetime(row: sqlite3.Row, name: str) -> datetime | None:
     value = _optional_str(row, name)
     return datetime.fromisoformat(value) if value is not None else None
+
+
+def _stored_extractor_identity(provenance: MemoryProvenance) -> str:
+    """Keep the v1 SQLite shape while round-tripping optional provider identities."""
+
+    if provenance.model_identity is None and provenance.response_identity is None:
+        return provenance.extractor_identity
+    payload = {
+        "extractor_identity": provenance.extractor_identity,
+        "model_identity": provenance.model_identity,
+        "response_identity": provenance.response_identity,
+    }
+    return _PROVENANCE_IDENTITY_PREFIX + json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    )
+
+
+def _load_extractor_identity(value: str) -> tuple[str, str | None, str | None]:
+    if not value.startswith(_PROVENANCE_IDENTITY_PREFIX):
+        return value, None, None
+    try:
+        payload = json.loads(value[len(_PROVENANCE_IDENTITY_PREFIX) :])
+    except json.JSONDecodeError as error:
+        raise ValueError("stored extractor identity envelope is invalid") from error
+    if not isinstance(payload, dict):
+        raise TypeError("stored extractor identity envelope must be an object")
+    identity = payload.get("extractor_identity")
+    model_identity = payload.get("model_identity")
+    response_identity = payload.get("response_identity")
+    if not isinstance(identity, str):
+        raise TypeError("stored extractor identity must be text")
+    if model_identity is not None and not isinstance(model_identity, str):
+        raise TypeError("stored model identity must be text or null")
+    if response_identity is not None and not isinstance(response_identity, str):
+        raise TypeError("stored response identity must be text or null")
+    return identity, model_identity, response_identity
 
 
 def _validate_apply_arguments(change_set: object, expected_revision: object) -> None:

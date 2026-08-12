@@ -135,6 +135,22 @@ class MemoryError(DQAgentError):
     category = ErrorCategory.UNAVAILABLE
 
 
+class MemoryExtractionError(MemoryError):
+    """Raised when a transient memory extraction cannot produce safe candidates."""
+
+
+class MemoryExtractionSourceError(MemoryExtractionError):
+    """Raised when an extraction source is not an explicit bounded committed turn."""
+
+    category = ErrorCategory.CONFIGURATION
+
+
+class MemoryExtractionFormatError(MemoryExtractionError):
+    """Raised when an extractor output violates the transient candidate contract."""
+
+    category = ErrorCategory.CONFIGURATION
+
+
 class MemoryValidationError(MemoryError, ValueError):
     """Raised when a long-term memory domain value violates an invariant."""
 

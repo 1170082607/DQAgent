@@ -464,6 +464,8 @@ def _print_candidate_preview(preview: MemoryProposal, *, operation: str) -> None
     print(f"provenance.source_id={_optional_text(provenance.source_id)}")
     print(f"provenance.source_revision={_optional_value(provenance.source_revision)}")
     print(f"provenance.run_id={_optional_text(provenance.run_id)}")
+    print(f"provenance.model_identity={_optional_text(provenance.model_identity)}")
+    print(f"provenance.response_identity={_optional_text(provenance.response_identity)}")
     print(f"candidate_digest={preview.candidate_digest}")
     print(f"policy.action={preview.decision.action.value}")
     print(f"policy.reason={preview.decision.reason.value}")
@@ -494,6 +496,8 @@ def _print_record(record: MemoryRecord) -> None:
     print(f"provenance.source_id={_optional_text(provenance.source_id)}")
     print(f"provenance.source_revision={_optional_value(provenance.source_revision)}")
     print(f"provenance.run_id={_optional_text(provenance.run_id)}")
+    print(f"provenance.model_identity={_optional_text(provenance.model_identity)}")
+    print(f"provenance.response_identity={_optional_text(provenance.response_identity)}")
     print(f"confirmation.candidate_digest={record.confirmation.candidate_digest}")
     print(f"confirmation.confirmed_at={record.confirmation.confirmed_at.isoformat()}")
 

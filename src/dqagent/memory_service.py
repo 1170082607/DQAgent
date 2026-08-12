@@ -44,6 +44,7 @@ from dqagent.memory_consolidation import (
     MemoryConsolidationDecision,
     MemoryConsolidator,
 )
+from dqagent.memory_policy import _content_admission_reason
 from dqagent.memory_recall import (
     MemoryMatch,
     MemoryMatchReason,
@@ -800,6 +801,14 @@ class MemoryService:
             return AdmissionDecision(
                 action=AdmissionAction.DENY,
                 reason=AdmissionReason.SENSITIVE_CONTENT_NOT_ALLOWED,
+                effective_scope=None,
+                expires_at=None,
+            )
+        content_reason = _content_admission_reason(candidate.content)
+        if content_reason is not None:
+            return AdmissionDecision(
+                action=AdmissionAction.DENY,
+                reason=content_reason,
                 effective_scope=None,
                 expires_at=None,
             )

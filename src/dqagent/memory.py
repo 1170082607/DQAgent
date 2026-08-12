@@ -94,6 +94,8 @@ class MemoryProvenance:
     source_id: str | None = None
     source_revision: int | None = None
     run_id: str | None = None
+    model_identity: str | None = None
+    response_identity: str | None = None
 
     def __post_init__(self) -> None:
         _require_instance("memory source type", self.source_type, MemorySourceType)
@@ -104,6 +106,10 @@ class MemoryProvenance:
             _validate_id("memory source ID", self.source_id)
         if self.run_id is not None:
             _validate_id("memory source run ID", self.run_id)
+        if self.model_identity is not None:
+            _validate_id("memory model identity", self.model_identity)
+        if self.response_identity is not None:
+            _validate_id("memory response identity", self.response_identity)
         if self.source_revision is not None:
             _validate_positive_integer("memory source revision", self.source_revision)
         if self.source_type is MemorySourceType.COMMITTED_SESSION_TURN:
@@ -113,6 +119,24 @@ class MemoryProvenance:
                 )
         elif self.source_revision is not None:
             raise MemoryValidationError("user draft provenance cannot contain a session revision")
+
+    @property
+    def source_digest(self) -> str:
+        """Short alias for the digest of the committed source item or turn."""
+
+        return self.source_item_digest
+
+    @property
+    def model(self) -> str | None:
+        """Provider-neutral model identity, when the provider exposes one."""
+
+        return self.model_identity
+
+    @property
+    def response_id(self) -> str | None:
+        """Provider-neutral response identity, when the provider exposes one."""
+
+        return self.response_identity
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,6 +181,26 @@ class MemoryCandidate:
     def canonical_json(self) -> str:
         """Return the versioned representation used for confirmation binding."""
 
+        provenance = {
+            "source_type": self.provenance.source_type.value,
+            "source_item_digest": self.provenance.source_item_digest,
+            "extractor_identity": self.provenance.extractor_identity,
+            "extracted_at": _canonical_datetime(self.provenance.extracted_at),
+            "source_id": self.provenance.source_id,
+            "source_revision": self.provenance.source_revision,
+            "run_id": self.provenance.run_id,
+        }
+        # Omit new optional fields when absent so existing v1 confirmation digests remain stable.
+        if (
+            self.provenance.model_identity is not None
+            or self.provenance.response_identity is not None
+        ):
+            provenance.update(
+                {
+                    "model_identity": self.provenance.model_identity,
+                    "response_identity": self.provenance.response_identity,
+                }
+            )
         payload = {
             "schema_version": self.schema_version,
             "scope": {"kind": self.scope.kind.value, "scope_id": self.scope.scope_id},
@@ -165,15 +209,7 @@ class MemoryCandidate:
             "content": self.content,
             "confidence": self.confidence.value,
             "sensitivity": self.sensitivity.value,
-            "provenance": {
-                "source_type": self.provenance.source_type.value,
-                "source_item_digest": self.provenance.source_item_digest,
-                "extractor_identity": self.provenance.extractor_identity,
-                "extracted_at": _canonical_datetime(self.provenance.extracted_at),
-                "source_id": self.provenance.source_id,
-                "source_revision": self.provenance.source_revision,
-                "run_id": self.provenance.run_id,
-            },
+            "provenance": provenance,
             "valid_from": _canonical_datetime(self.valid_from),
             "expires_at": (
                 _canonical_datetime(self.expires_at) if self.expires_at is not None else None

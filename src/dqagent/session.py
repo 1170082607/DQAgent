@@ -5,7 +5,7 @@ import json
 import os
 from collections.abc import Mapping
 from contextlib import suppress
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
@@ -38,6 +38,7 @@ class SessionSnapshot:
     revision: int = 0
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    _store_issued: bool = field(init=False, repr=False, compare=False, default=False)
 
     def __post_init__(self) -> None:
         if not self.session_id.strip():
@@ -116,12 +117,13 @@ def _next_snapshot(
             f"expected {expected_revision!r}, found {actual_revision!r}"
         )
     now = datetime.now(UTC)
-    return replace(
+    saved = replace(
         snapshot,
         revision=1 if current is None else current.revision + 1,
         created_at=current.created_at if current is not None else now,
         updated_at=now,
     )
+    return _mark_store_issued(saved)
 
 
 class InMemorySessionStore:
@@ -154,7 +156,7 @@ class InMemorySessionStore:
 
     @staticmethod
     def _clone(snapshot: SessionSnapshot) -> SessionSnapshot:
-        return SessionSnapshot.from_dict(snapshot.to_dict())
+        return _mark_store_issued(SessionSnapshot.from_dict(snapshot.to_dict()))
 
 
 class JsonFileSessionStore:
@@ -193,7 +195,7 @@ class JsonFileSessionStore:
                 raise SessionError(
                     f"cannot save session '{snapshot.session_id}': {exc}"
                 ) from exc
-            return SessionSnapshot.from_dict(saved.to_dict())
+            return _mark_store_issued(SessionSnapshot.from_dict(saved.to_dict()))
 
     def _load_unlocked(self, session_id: str) -> SessionSnapshot | None:
         path = self._path_for(session_id)
@@ -208,7 +210,7 @@ class JsonFileSessionStore:
         snapshot = SessionSnapshot.from_dict(cast(dict[str, Any], raw))
         if snapshot.session_id != session_id:
             raise SessionError(f"session identity mismatch for '{session_id}'")
-        return snapshot
+        return _mark_store_issued(snapshot)
 
     def _path_for(self, session_id: str) -> Path:
         _validate_session_id(session_id)
@@ -219,6 +221,11 @@ class JsonFileSessionStore:
 def _validate_session_id(session_id: str) -> None:
     if not session_id.strip():
         raise ValueError("session ID must not be empty")
+
+
+def _mark_store_issued(snapshot: SessionSnapshot) -> SessionSnapshot:
+    object.__setattr__(snapshot, "_store_issued", True)
+    return snapshot
 
 
 def _item_to_dict(item: ConversationItem) -> dict[str, object]:

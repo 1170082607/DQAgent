@@ -2,11 +2,11 @@
 
 ## Status
 
-This document describes the implemented Phase 8 T9 architecture. Memory management is available as
+This document describes the implemented Phase 8 T10 architecture. Memory management is available as
 a model-free explicit application service, request-time policy-filtered recall, an optional durable
-session read stage, a bounded context projection, and independent memory/session CLI composition;
-model-assisted extraction, automatic memory writes, hard execution isolation, and other future
-capabilities remain in the [roadmap](roadmap.md).
+session read stage, a bounded context projection, a pure source-to-transient-candidate extraction
+boundary, and independent memory/session CLI composition. Automatic memory writes, hard execution
+isolation, and other future capabilities remain in the [roadmap](roadmap.md).
 
 ## System Context
 
@@ -51,6 +51,10 @@ MemoryRecallRequest -> MemoryService -> exact-scope MemoryStore + MemoryPolicy
                                       +-> MemoryRecall (selected/omitted matches)
 
 MemoryRecall -> ContextBuilder -> lower-authority memory projection
+
+CommittedSessionTurn -> MemoryExtractor -> transient MemoryCandidate
+                                      |
+                                      +-> MemoryService.preview -> explicit digest confirmation
 ```
 
 The main CLI is the composition root for model-backed chat. The independent `dqagent-memory` CLI is
@@ -126,6 +130,14 @@ store's exact-scope revision CAS. `list` and `show` are inspection operations th
 expiry into the record lifecycle. `correct` requires an explicit target ID and commits a superseded
 old record plus a new record in one store change set. `forget` requires the exact scope and ID and
 leaves only a content-free tombstone.
+
+`CommittedSessionTurn` is the extraction source boundary. It is created from one committed,
+complete, bounded session turn and retains only that turn, its digest, revision, and bound metadata.
+`MemoryExtractor` has no store access. `DeterministicMemoryExtractor` consumes explicit fixtures;
+`ModelMemoryExtractor` calls only the neutral `LLMClient`, sends no tools, validates strict JSON, and
+constructs trusted provenance from the source and completion. `MemoryExtractionPipeline` is the
+explicit application bridge that previews each transient candidate through `MemoryService`; it does
+not confirm or automatically write candidates.
 
 `MemoryConsolidator` compares immutable scope data without importing or calling a store. It treats
 the same kind/topic/content proposition as an exact duplicate that may refresh provenance and
@@ -239,6 +251,7 @@ UTC timestamp, elapsed seconds, and structured attributes. Current event types c
   classification.
 - Context assembly with budget, turn selection, knowledge keys, and summary provenance.
 - Workflow node, transition, checkpoint, interruption, and resume activity.
+- Memory extraction start, completion, and failure for its independent coordinator operation.
 
 `AgentRunResult.events` returns the complete successful event sequence. `EventSink` adapters receive
 events as they happen, including terminal failure events, and can translate them into traces,
@@ -522,6 +535,9 @@ SessionAgentApplication -> RunCoordinator + Retriever + MemoryService + explicit
 RetrievalEvaluationRunner -> DocumentIngestor + VectorRetriever
 MemoryService -> MemoryPolicy + MemoryConsolidator + MemoryStore + MemorySelector
 MemorySelector -> EmbeddingProvider
+MemoryExtractionPipeline -> MemoryExtractor + MemoryService
+DeterministicMemoryExtractor -> committed bounded source + explicit fixture
+ModelMemoryExtractor -> RunCoordinator + LLMClient + neutral models + jsonschema
 ```
 
 - Session state is owned above the runtime; one run cannot commit partial history.
@@ -536,6 +552,9 @@ MemorySelector -> EmbeddingProvider
 - Retrieval content is request-scoped external data, not durable session state or long-term memory.
 - MemoryService owns memory policy/consolidation orchestration; MemoryStore only loads exact scopes
   and applies validated change sets. The store has no remember/retrieve/sensitivity policy.
+- MemoryExtractor owns no store or mutation capability and produces only transient candidates from an
+  explicit bounded source. Model candidates are untrusted until `MemoryService.preview` and exact
+  digest confirmation; extraction is an explicit operation, not a post-chat hook.
 - Memory candidates are transient; there is no persistent pending-candidate queue. Recall is not
   connected to retrieval ranking or chat orchestration. ContextBuilder accepts only the completed
   `MemoryRecall` projection and does not perform store access, eligibility, or ranking.
@@ -602,7 +621,8 @@ nondeterminism make it an unsuitable correctness gate.
   are lossy, and model summarization adds a provider call before the main agent run.
 - Memory management, request-time recall, and bounded recall/context projection are explicit and
   cross-session through the service, stores, selector, ContextBuilder, and `dqagent-memory` CLI;
-  chat orchestration and model-assisted extraction are not integrated yet.
+  extraction is also explicit through `MemoryExtractor` and is not integrated as automatic chat
+  behavior.
 - The retrieval store is small, synchronous, single-process, and brute-force. Hashing embeddings are
   lexical, exact digest deduplication misses near-duplicates, and answer checks use explicit lexical
   claims rather than a semantic or LLM-based judge.
@@ -632,3 +652,4 @@ nondeterminism make it an unsuitable correctness gate.
 - [Phase 6 Session and Context Comparison](learning/phase-6-session-context-comparison.md)
 - [Phase 7 Retrieval Framework Comparison](learning/phase-7-retrieval-framework-comparison.md)
 - [ADR-0009: Policy-Governed Long-Term Memory](adr/0009-policy-governed-long-term-memory.md)
+- [ADR-0010: Keep Memory Extraction Before Deterministic Admission](adr/0010-transient-memory-extraction-boundary.md)

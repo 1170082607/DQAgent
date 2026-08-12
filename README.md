@@ -4,9 +4,10 @@ DQAgent is an engineering-first learning project for building AI Agent capabilit
 from foundational components. Its purpose is to understand the design of production-oriented agent
 systems instead of treating frameworks as black boxes.
 
-**Status:** Pre-alpha. Phase 8 T9 is implemented: DQAgent supports durable bounded sessions,
-explicit local RAG, and optional exact-scope read-only memory recall with provider-neutral
-boundaries, citation/memory provenance, and deterministic regression evaluations.
+**Status:** Pre-alpha. Phase 8 T10 is implemented: DQAgent supports durable bounded sessions,
+explicit local RAG, optional exact-scope read-only memory recall, and explicit source-to-transient-
+candidate extraction with provider-neutral boundaries, citation/memory provenance, and deterministic
+regression evaluations.
 
 ## Goals
 
@@ -86,13 +87,17 @@ boundaries, citation/memory provenance, and deterministic regression evaluations
   with atomic record omission, independent budgeting, and content-free projection evidence.
 - Optional read-only memory recall in durable `dqagent` sessions with an explicit SQLite database
   and exact user/project scope; typed recall dependency failures fall back without memory.
+- A pure `MemoryExtractor` boundary for one committed, bounded session turn, with deterministic
+  fixtures and a model-assisted strict JSON path that has no mutation tools or store access.
+- Source-derived extraction provenance, independent extraction run IDs, and an explicit pipeline that
+  sends every candidate through policy preview and exact digest confirmation.
 - Environment-based configuration with explicit validation.
 - Unit tests, Ruff linting, mypy strict type checking, and GitHub Actions CI.
 
-Model-assisted extraction and automatic memory writes, streaming, hard execution isolation, approval
-policy, distributed session/workflow leases, durable telemetry delivery, LLM-as-judge, and repeated
-live-model sampling remain deferred. Evaluation, security, durability, and observability remain
-continuous constraints for later phases.
+Automatic memory writes, streaming, hard execution isolation, approval policy, distributed
+session/workflow leases, durable telemetry delivery, LLM-as-judge, and repeated live-model sampling
+remain deferred. Evaluation, security, durability, and observability remain continuous constraints
+for later phases.
 
 ## Installation
 
@@ -297,6 +302,7 @@ src/dqagent/memory.py Domain values and policy contracts for selected memory
 src/dqagent/memory_consolidation.py Store-neutral deterministic consolidation
 src/dqagent/memory_service.py Explicit memory management application service
 src/dqagent/memory_store.py Exact-scope transactional memory stores
+src/dqagent/memory_extraction.py Source-to-transient-candidate extraction boundary
 src/dqagent/memory_cli.py Independent model-free memory management CLI
 src/dqagent/workflow.py Deterministic workflow definition and runner
 src/dqagent/checkpoint.py Workflow checkpoint contract and stores

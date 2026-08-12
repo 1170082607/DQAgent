@@ -41,6 +41,11 @@ _PRIVATE_KEY_MARKER_PATTERN = re.compile(
     r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----",
     re.IGNORECASE,
 )
+_SENSITIVE_CONTENT_PATTERN = re.compile(
+    r"(?i)(?<![A-Za-z0-9])(?:health|medical|diagnos(?:is|ed)|medicat(?:ion|ed)|"
+    r"prescription|treatment|therapy|symptom|disease|diabetes|asthma|cancer|"
+    r"pregnan(?:t|cy)|disability|mental health)(?![A-Za-z0-9])"
+)
 
 
 class DefaultMemoryPolicy:
@@ -66,8 +71,9 @@ class DefaultMemoryPolicy:
             return _deny_admission(AdmissionReason.SECRET_CONTENT_NOT_ALLOWED)
         if candidate.sensitivity is MemorySensitivity.SENSITIVE:
             return _deny_admission(AdmissionReason.SENSITIVE_CONTENT_NOT_ALLOWED)
-        if _looks_like_secret_content(candidate.content):
-            return _deny_admission(AdmissionReason.SECRET_CONTENT_NOT_ALLOWED)
+        content_reason = _content_admission_reason(candidate.content)
+        if content_reason is not None:
+            return _deny_admission(content_reason)
         if not _kind_allowed_in_scope(candidate.kind, scope.kind):
             return _deny_admission(AdmissionReason.KIND_NOT_ALLOWED)
         if candidate.provenance.extracted_at > now:
@@ -134,6 +140,16 @@ def _looks_like_secret_content(content: str) -> bool:
         _SECRET_ASSIGNMENT_PATTERN.search(content)
         or _PRIVATE_KEY_MARKER_PATTERN.search(content)
     )
+
+
+def _content_admission_reason(content: str) -> AdmissionReason | None:
+    """Apply deterministic defense-in-depth before trusting an extractor label."""
+
+    if _looks_like_secret_content(content):
+        return AdmissionReason.SECRET_CONTENT_NOT_ALLOWED
+    if _SENSITIVE_CONTENT_PATTERN.search(content) is not None:
+        return AdmissionReason.SENSITIVE_CONTENT_NOT_ALLOWED
+    return None
 
 
 def _deny_admission(reason: AdmissionReason) -> AdmissionDecision:

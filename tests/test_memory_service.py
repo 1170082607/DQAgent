@@ -346,6 +346,20 @@ def test_service_hard_denies_sensitive_writes_even_with_a_permissive_policy(
     assert store.load(USER_SCOPE) == baseline
 
 
+def test_service_hard_denies_sensitive_like_content_even_with_a_permissive_policy() -> None:
+    store = InMemoryMemoryStore()
+    service = MemoryService(store, PermissiveWritePolicy(), clock=lambda: NOW)
+    candidate = replace(make_candidate(), content="The user has diabetes.")
+
+    preview = service.preview(candidate, scope=USER_SCOPE)
+
+    assert preview.decision.action is AdmissionAction.DENY
+    assert preview.decision.reason is AdmissionReason.SENSITIVE_CONTENT_NOT_ALLOWED
+    with pytest.raises(MemoryAdmissionDeniedError):
+        service.confirm(candidate, candidate.digest, scope=USER_SCOPE)
+    assert store.load(USER_SCOPE) == MemoryScopeSnapshot(USER_SCOPE)
+
+
 class ApplyFailingStore:
     def __init__(self, snapshot: MemoryScopeSnapshot) -> None:
         self.snapshot = snapshot
