@@ -2,11 +2,11 @@
 
 ## Status
 
-This document describes the implemented Phase 8 T5-T11 architecture as documented by T12. Memory
-management is available as a model-free explicit application service, request-time policy-filtered
-recall, an optional durable session read stage, a bounded context projection, a pure
-source-to-transient-candidate extraction boundary, and independent memory/session CLI composition.
-The roadmap remains the source of truth for deferred capabilities; Phase 8 is still in progress.
+This document describes the implemented Phase 8 T5-T13 architecture. Memory management is available
+as a model-free explicit application service, request-time policy-filtered recall, an optional durable
+session read stage, a bounded context projection, a pure source-to-transient-candidate extraction
+boundary, and independent memory/session CLI composition. The roadmap remains the source of truth for
+deferred capabilities; Phase 8 is complete within its documented v1 scope.
 
 ## System Context
 
@@ -245,11 +245,14 @@ usual O(N log N) comparison cost. There is no persistent vector index.
 
 These boundaries are also the privacy boundary. The SQLite file is local and unencrypted; sensitive
 and secret candidates are denied before storage under the default policy and service-owned hard
-checks. Scope IDs are explicit inputs and recall results must match the requested scope. Memory
-payloads can appear in explicit management output and model context by design, but not in run event
-attributes or sanitized service errors. Event attributes use a scope digest for recall requests;
-memory IDs and bounded counts identify selected results without copying their content. The CLI
-escapes non-printable text and keeps dependency failures off stderr payloads.
+checks. The same defense rejects a finite set of obvious credential, sensitive-term, SSN,
+telephone-number, and street-address patterns even when a candidate is labelled non-sensitive; it
+is not a complete PII classifier. Scope IDs are explicit inputs and recall results must match the
+requested scope. Memory payloads can appear in explicit management output and model context by
+design, but not in run event attributes or sanitized service-error metadata. Event attributes and
+service-error metadata use a scope digest; memory IDs and bounded counts identify selected results
+without copying their content. The CLI escapes non-printable text and keeps dependency failures off
+stderr payloads.
 
 The memory CLI previews remember/correct candidates through a process-local, non-persistent service.
 It prints the exact candidate fields and digest, then accepts only `yes` or `confirm`; a rejection or
@@ -686,9 +689,10 @@ the runtime's model-attempt budget and defaults to three. All values are validat
   regression snapshots.
 - Retrieval tests assert exact offsets, update/delete behavior, duplicate folding, embedding identity,
   atomic JSON persistence, empty retrieval, citation propagation, prompt isolation, and ranking reports.
-- Memory service tests assert transient proposals, policy rejection, digest and clock revalidation,
-  exact-scope operations, duplicate refresh, topic conflict, CAS concurrency, expiry, atomic
-  correction/forgetting, content-free metadata, and an SQLite integration smoke path.
+- Memory service tests assert transient proposals, policy rejection including obvious PII patterns,
+  digest and clock revalidation, exact-scope operations, duplicate refresh, topic conflict, CAS
+  concurrency, expiry, atomic correction/forgetting, digest-only content-free metadata, and an
+  SQLite integration smoke path.
 - Memory CLI tests assert explicit scope parsing, model-free composition, exact candidate display,
   confirmation rejection/EOF zero-write behavior, sensitive-payload suppression, cross-instance
   SQLite visibility, lifecycle/provenance output, correction, forgetting, tombstones, and stable
@@ -722,7 +726,8 @@ nondeterminism make it an unsuitable correctness gate.
   cross-session through the service, stores, selector, ContextBuilder, and `dqagent-memory` CLI;
   extraction is also explicit through `MemoryExtractor` and is not integrated as automatic chat
   behavior. The store is unencrypted, logical forget is not forensic erase, corrected superseded
-  history is not recursively erased, and direct service calls do not prove human authorization.
+  history is not recursively erased, direct service calls do not prove human authorization, and the
+  deterministic PII defense is not a complete classifier.
 - Encrypted sensitive-memory storage, forensic erase, persistent memory vector indexing, unconfirmed
   or automatic writes, distributed tenancy/leases, background consolidation, bulk deletion, and
   unsupported capabilities remain deferred. No current test or evaluation justifies claiming them.

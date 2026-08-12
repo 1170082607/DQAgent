@@ -260,6 +260,30 @@ def test_default_policy_denies_credential_like_content_when_label_is_non_sensiti
 
 
 @pytest.mark.parametrize(
+    "content",
+    [
+        "My SSN is 123-45-6789.",
+        "Call me at 555-123-4567.",
+        "I live at 12 Main Street.",
+    ],
+)
+def test_default_policy_denies_obvious_pii_when_label_is_non_sensitive(content: str) -> None:
+    candidate = replace(
+        make_candidate(sensitivity=MemorySensitivity.NON_SENSITIVE),
+        content=content,
+    )
+
+    decision = DefaultMemoryPolicy().assess_write(candidate, scope=USER_SCOPE, now=NOW)
+
+    assert decision == AdmissionDecision(
+        action=AdmissionAction.DENY,
+        reason=AdmissionReason.SENSITIVE_CONTENT_NOT_ALLOWED,
+        effective_scope=None,
+        expires_at=None,
+    )
+
+
+@pytest.mark.parametrize(
     ("candidate", "reason"),
     [
         (

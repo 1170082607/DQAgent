@@ -31,6 +31,8 @@ jobs:
             --output context-evaluation-report.json
           dqagent-retrieval-eval \
             --output retrieval-evaluation-report.json
+          dqagent-memory-eval \
+            --output memory-evaluation-report.json
 
       - name: Upload evaluation report
         if: always()
@@ -41,4 +43,5 @@ jobs:
             evaluation-report.json
             context-evaluation-report.json
             retrieval-evaluation-report.json
+            memory-evaluation-report.json
           retention-days: 30

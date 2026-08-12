@@ -4,11 +4,11 @@ DQAgent is an engineering-first learning project for building AI Agent capabilit
 from foundational components. Its purpose is to understand the design of production-oriented agent
 systems instead of treating frameworks as black boxes.
 
-**Status:** Pre-alpha. Phase 8 T12 documentation is delivered: T5-T11 are implemented and
-evaluated. DQAgent supports durable bounded sessions, explicit local RAG, optional exact-scope
-read-only memory recall, and explicit source-to-transient-candidate extraction with provider-neutral
-boundaries, citation/memory provenance, and deterministic regression evaluations. Phase 8 remains
-in progress.
+**Status:** Pre-alpha. Phase 8 T13 closure is complete: T5-T12 are implemented and evaluated, and
+the final audit findings are closed. DQAgent supports durable bounded sessions, explicit local RAG,
+optional exact-scope read-only memory recall, and explicit source-to-transient-candidate extraction
+with provider-neutral boundaries, citation/memory provenance, and deterministic regression
+evaluations. Phase 8 is complete within its documented v1 scope.
 
 ## Goals
 
@@ -82,8 +82,8 @@ in progress.
   atomic correction, forgetting tombstones, expiry materialization, and fail-closed errors.
 - An independent `dqagent-memory` CLI for remember, list, show, correct, and forget without model
   credentials; it defaults to `.local/memory.sqlite3` and accepts an explicit `--database` path.
-- Content-free memory operation metadata for event-ready audit attributes; memory content remains in
-  explicit result payloads only.
+- Content-free memory operation metadata for event-ready audit attributes; scope identifiers use
+  SHA-256 digests in metadata, and memory content remains in explicit result payloads only.
 - Request-time memory recall projected into bounded context as lower-authority untrusted user data,
   with atomic record omission, independent budgeting, and content-free projection evidence.
 - Optional read-only memory recall in durable `dqagent` sessions with an explicit SQLite database
@@ -94,14 +94,17 @@ in progress.
   sends every candidate through policy preview and exact digest confirmation.
 - A credential-free Phase 8 memory evaluation suite and deterministic baseline that separately reports
   admission, ranking, context selection, answer utilization, no-result semantics, and direct predicates.
+- Default policy denial for credential markers, selected sensitive terms, and a finite set of obvious
+  SSN, telephone-number, and street-address patterns; this is not a complete PII classifier.
 - Environment-based configuration with explicit validation.
 - Unit tests, Ruff linting, mypy strict type checking, and GitHub Actions CI.
 
-The implemented memory path does not automatically write candidates from chat. Encrypted sensitive
-memory storage, forensic erase, a persistent memory vector index, unconfirmed automatic writes,
-distributed tenancy or leases, background consolidation, streaming, hard execution isolation,
-approval policy, durable telemetry delivery, LLM-as-judge, repeated live-model sampling, and other
-capabilities not supported by the current evidence remain deferred. Evaluation, security,
+The implemented memory path does not automatically write candidates from chat. Its deterministic
+PII defense is intentionally finite and does not establish complete PII classification. Encrypted
+sensitive memory storage, forensic erase, a persistent memory vector index, unconfirmed automatic
+writes, distributed tenancy or leases, background consolidation, streaming, hard execution
+isolation, approval policy, durable telemetry delivery, LLM-as-judge, repeated live-model sampling,
+and other capabilities not supported by the current evidence remain deferred. Evaluation, security,
 durability, and observability remain continuous constraints for later phases.
 
 ## Installation

@@ -22,3 +22,4 @@ to an ADR when it becomes a durable project decision.
 - [Phase 6 Comparison: DQAgent Session and Context Boundaries](phase-6-session-context-comparison.md)
 - [Phase 7 Comparison: DQAgent Retrieval, LangChain, and Chroma](phase-7-retrieval-framework-comparison.md)
 - [Phase 8 Comparison: DQAgent, LangGraph Store, and Letta](phase-8-memory-framework-comparison.md)
+- [Phase 8 Closure Record](phase-8-closure.md)

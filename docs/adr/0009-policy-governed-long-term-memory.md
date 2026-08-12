@@ -1,7 +1,8 @@
 # ADR-0009: Policy-Governed Long-Term Memory
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-07
+- Accepted: 2026-08-13
 
 ## Context
 
@@ -13,8 +14,9 @@ guesses; putting memory in the retrieval index would confuse personalization wit
 evidence and make consent, correction, expiry, and forgetting implicit.
 
 This ADR freezes the behavioral and ownership contract for the v1 design. Its implementation shape
-is now exercised by T5-T11, but the ADR remains Proposed because production privacy, authorization,
-tenancy, and scale requirements are not yet closed by evidence.
+is exercised by T5-T13. The ADR is Accepted for this bounded v1 contract; production encryption,
+comprehensive PII classification, authorization proof, distributed tenancy, and scale remain
+explicit limitations or deferred capabilities rather than implied guarantees.
 
 ## Decision
 
@@ -39,8 +41,9 @@ adapters remain policy-neutral.
   The core service enforces the candidate content/scope digest supplied after preview; the standalone
   CLI is the current implementation of the human confirmation step. A caller that invokes the service
   directly must provide its own authorization UX, so the service cannot prove human intent from a
-  digest alone. Secret and sensitive content is denied in v1 because the local authoritative store is
-  not encrypted; confidence is evidence about the extractor, never truth or consent.
+  digest alone. Secret and sensitive content, plus a finite deterministic set of obvious PII patterns,
+  is denied in v1 because the local authoritative store is not encrypted. This defense is not a
+  complete PII classifier; confidence is evidence about the extractor, never truth or consent.
 - Correction creates a new record and atomically supersedes the selected old record. Ordinary
   confirmation cannot silently overwrite a conflicting active topic.
 
@@ -149,7 +152,7 @@ Phase 8 does not change these existing dependency directions or observable behav
 
 ## Implementation Evidence
 
-T5-T11 validate the contract through the production paths rather than test-only doubles:
+T5-T13 validate the contract through the production paths rather than test-only doubles:
 
 - `MemoryService` owns preview, exact digest revalidation, policy checks, deterministic
   duplicate-refresh/topic-conflict consolidation, correction, expiry, forgetting, and request-time
@@ -179,12 +182,23 @@ T5-T11 validate the contract through the production paths rather than test-only 
   source, and sends candidates through preview; `tests/test_memory_extraction.py` covers malformed
   output, tool calls, hallucinated provenance, source injection, cancellation, deadline, and
   zero-write failure behavior. ADR-0010 remains the detailed extraction boundary.
+- T13 closes the final audit findings with focused evidence: `MemoryEventMetadata` and
+  `MemoryServiceError.metadata` expose `scope_id_digest` rather than a raw scope ID;
+  `DefaultMemoryPolicy` denies a finite set of obvious SSN, telephone-number, and street-address
+  patterns in addition to existing credential and sensitive-term checks; and the CI workflow runs
+  and uploads `dqagent-memory-eval`. `tests/test_memory_service.py`,
+  `tests/test_memory_policy.py`, and `tests/test_ci_workflow.py` cover these boundaries.
 - `evaluations/cases/phase-8-memory-v1.json` contains 13 cases and
   `evaluations/baselines/phase-8-memory-deterministic-v1.json` records the production-path result:
   13/13 passed, false admission 0/3, mean `Recall@k` and `Precision@k` 1.0 over seven applicable
   cases, scope leakage 0/1, stale/forgotten recall 0/3, harmful over-retrieval 0/2, correction
   compliance 1/1, no-result correctness 12/12, and direct answer predicates 13/13. This evidence
   is deterministic fixture regression evidence, not an LLM quality or compliance certification.
+- The T13 release run passed `ruff check .`, `mypy src`, `pytest --basetemp
+  .local/pytest-phase8-t13` (`424 passed`, `89.06%` coverage), the Phase 3/6/7/8 deterministic
+  evaluators, documentation/ADR consistency checks, and `git diff --check`. The release checks
+  validate the v1 contract and repository hygiene; they do not close the explicitly deferred
+  production capabilities below.
 
 The implementation refines two v1 statements. First, "explicit confirmation" is enforced as an
 exact digest at the service boundary and as interactive confirmation in `dqagent-memory`; arbitrary
@@ -212,6 +226,9 @@ the current evidence, not capabilities to infer from the interface.
 - The local store remains unencrypted and cannot satisfy compliance-grade sensitive-data or deletion
   requirements; corrected superseded history is also retained as an inspection-only lifecycle
   record. These limitations are intentional v1 scope, not production guarantees.
+- Deterministic content checks cover a finite set of obvious credentials, sensitive terms, SSNs,
+  telephone numbers, and street addresses; they are defense-in-depth and not comprehensive PII
+  classification.
 
 ## Alternatives Considered
 
@@ -258,7 +275,7 @@ the interactive confirmation boundary, while the service keeps the content-bindi
 ## Explicitly Deferred
 
 The current evidence does not support encrypted sensitive-memory storage, forensic erase,
-persistent memory vector indexes, unconfirmed or automatic writes, distributed tenancy or leases,
-background consolidation, bulk deletion, durable audit delivery, or any broader capability not
-covered by the Phase 8 deterministic contract. These are deferred rather than implied by the v1
-interfaces.
+persistent memory vector indexes, complete PII classification, unconfirmed or automatic writes,
+distributed tenancy or leases, background consolidation, bulk deletion, durable audit delivery, or
+any broader capability not covered by the Phase 8 deterministic contract. These are deferred rather
+than implied by the v1 interfaces.

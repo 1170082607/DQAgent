@@ -204,109 +204,30 @@ embedding provider and scalable vector store require a concrete corpus and a new
 
 ### Phase 8: Long-Term Memory
 
-**Status:** In progress
+**Status:** Complete
 
 **Outcome:** Retain useful experience across sessions without turning the transcript into memory.
 
-- Define memory records, scope, provenance, confidence, and lifecycle.
-- Separate memory selection, extraction, retrieval, consolidation, correction, and forgetting.
-- Reuse persistence and retrieval capabilities without hiding memory policy inside storage adapters.
-- Support user-visible inspection and deletion before storing sensitive or durable facts.
-- Evaluate false memories, stale preferences, cross-session recall, and harmful over-retrieval.
+- [x] Define policy-governed memory records, explicit user/project scope, provenance, confidence, and lifecycle.
+- [x] Separate extraction, admission, selection, retrieval, consolidation, correction, and forgetting.
+- [x] Provide transactional SQLite persistence with scope revision concurrency control and logical forgetting.
+- [x] Deliver explicit management, bounded cross-session recall, lower-authority context projection, and safe failure semantics.
+- [x] Evaluate false memories, stale preferences, cross-session recall, scope isolation, and harmful over-retrieval through a deterministic production-path suite.
+- [x] Record implementation evidence, source comparison, ADR acceptance, final audit closure, and release quality gates.
 
 Memory is selected state with policy. Saving every message or embedding the full transcript does not
 meet this phase's objective.
 
-**T5 delivered:**
+Detailed T0-T13 evidence, including the retrospective reconstruction of the missing T0-T4 record,
+is preserved in the [Phase 8 Closure Record](learning/phase-8-closure.md). The architecture and
+acceptance contract are in [ADR-0009](adr/0009-policy-governed-long-term-memory.md), the implemented
+dependency direction is in [architecture.md](architecture.md), and the deterministic behavioral
+evidence is in [the Phase 8 evaluation suite](../evaluations/README.md#phase-8-memory).
 
-- [x] Add a model-free `MemoryService` for transient proposal, exact confirmation, inspection,
-  correction, and forgetting use cases.
-- [x] Keep deterministic consolidation outside storage: duplicates refresh, while active topic
-  conflicts require explicit correction.
-- [x] Validate scope, candidate digest, policy, and clock again at confirmation time, with
-  optimistic-concurrency and content-free operation metadata.
-
-**T6 delivered:**
-
-- [x] Add an independent `dqagent-memory` CLI for remember, list, show, correct, and forget.
-- [x] Require explicit scope kind/ID, local SQLite path selection, exact candidate display, and
-  affirmative confirmation without model/provider configuration or a `--yes` mutation bypass.
-- [x] Keep CLI policy and persistence behind `MemoryService`; test sensitive denial, rejection/EOF
-  zero-write behavior, stable output/error contracts, and cross-instance SQLite visibility.
-
-**T7 delivered:**
-
-- [x] Add policy-filtered, deterministic, request-time recall with exact scope isolation and no
-  persistent memory vector index.
-- [x] Reuse the provider-neutral embedding boundary for eligible records and the query, with stable
-  scores, selector identity, tie-breaking, score/count/kind/character post-rank limits, and atomic
-  record selection.
-- [x] Test filter-before-rank, scope isolation, expired and superseded exclusion, ranking ties,
-  explicit no-result behavior, bounded recall, and harmful over-retrieval.
-
-**T8 delivered:**
-
-- [x] Project a completed `MemoryRecall` through `ContextBuilder` as a lower-authority,
-  untrusted user-data block with an independent character budget.
-- [x] Preserve current-request, mandatory-prompt, RAG, and required-recent-turn priority while
-  admitting memory records atomically before older transcript and summary content.
-- [x] Return content-free memory projection evidence and event attributes without memory payloads
-  or raw scope IDs.
-- [x] Regression-test disabled memory behavior against the Phase 6/7 context checkpoint and test
-  empty recall, prompt injection-shaped memory, budget omission, and RAG separation.
-
-**T9 delivered:**
-
-- [x] Add optional exact-scope, read-only memory recall to the `SessionAgentApplication` run with
-  the required retrieval -> memory -> context -> runtime -> session CAS order.
-- [x] Emit coordinator-scoped memory recall lifecycle events with content-free attributes and keep
-  typed memory failures best effort without weakening cancellation, deadline, or unknown-failure
-  handling.
-- [x] Expose recall and context projection evidence without writing memory or context projections
-  to durable session transcripts; session CAS remains outside memory operations.
-- [x] Add explicit memory database and scope configuration to the durable-session `dqagent` CLI,
-  while preserving disabled Phase 6/7 behavior.
-- [x] Test cross-session recall, exact scope isolation, empty recall, fallback, cancellation,
-  deadlines, unexpected failures, RAG ordering, untrusted memory projection, CAS behavior, and
-  CLI configuration validation.
-
-**T10 delivered:**
-
-- [x] Establish a pure `MemoryExtractor` boundary from one explicitly selected, committed, bounded
-  session turn to transient candidates, with a deterministic fixture path for core behavior and
-  evaluation.
-- [x] Keep model-assisted extraction behind the provider-neutral `LLMClient` with strict JSON/schema
-  limits, source-derived provenance, no tools, no transcript copy, and an independent coordinator run.
-- [x] Preserve deterministic policy, exact preview, and digest confirmation as the only path to a
-  durable write; extraction is not automatic chat behavior and confidence never authorizes storage.
-- [x] Test zero/multiple candidates, malformed and oversized output, prompt injection-shaped source,
-  tool calls, hallucinated provenance, cancellation, deadlines, independent run identity, and
-  zero-write failure behavior without using a live provider as a CI gate.
-
-**T11 delivered:**
-
-- [x] Add a versioned, credential-free long-term memory suite and deterministic baseline through the
-  production MemoryService, policy, store, selector, ContextBuilder, and SessionAgentApplication path.
-- [x] Report write admission, recall ranking, context selection, and answer utilization separately,
-  including false admission, Recall@k/Precision@k, scope leakage, stale/forgotten recall, harmful
-  over-retrieval, correction compliance, memory context size, direct predicates, and no-result semantics.
-- [x] Cover confirmed cross-session preference, false inference, request override, correction, expiry,
-  forgetting, scope isolation, sensitive/secret denial, irrelevant and malicious memory, RAG/citation
-  separation, and no-memory regression.
-- [x] Keep deterministic fixtures as the CI gate and document that hashing embeddings and scripted
-  answers prove architecture regression only; no LLM-as-judge or credentialed live gate is required.
-
-**T12 delivered:**
-
-- [x] Update README, architecture, evaluation semantics, and ADR-0009 from implemented test and
-  deterministic evaluation evidence without changing Phase 8 status or accepting the Proposed ADR.
-- [x] Record actual inspection, correction, forgetting, recall, safe-default, transaction,
-  concurrency, failure, privacy, authority, and observability behavior, including explicit limits.
-- [x] Add a pinned-source comparison with LangGraph Store and Letta that separates reusable
-  principles from framework mechanics and documents where the analogies fail.
-- [x] Keep encrypted sensitive storage, forensic erase, persistent memory vector indexing,
-  unconfirmed/automatic writes, distributed tenancy, background consolidation, and unsupported
-  capabilities deferred.
+Deferred from this phase: encrypted sensitive-memory storage, forensic erasure, complete PII
+classification, persistent or managed memory vector indexes, unconfirmed or automatic writes,
+distributed tenancy or leases, background consolidation, bulk deletion, durable audit delivery, and
+live-model memory-quality evaluation.
 
 ### Phase 9: Coding Agent Harness and Safety
 

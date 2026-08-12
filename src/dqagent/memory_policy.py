@@ -46,6 +46,17 @@ _SENSITIVE_CONTENT_PATTERN = re.compile(
     r"prescription|treatment|therapy|symptom|disease|diabetes|asthma|cancer|"
     r"pregnan(?:t|cy)|disability|mental health)(?![A-Za-z0-9])"
 )
+_SSN_PATTERN = re.compile(r"(?<![0-9])\d{3}-\d{2}-\d{4}(?![0-9])")
+_PHONE_PATTERN = re.compile(
+    r"(?<![0-9])(?:\+?1[\s.-]?)?(?:\(\d{3}\)|\d{3})[\s.-]\d{3}[\s.-]\d{4}(?![0-9])"
+)
+_STREET_ADDRESS_PATTERN = re.compile(
+    r"(?i)(?<![A-Za-z0-9])\d{1,6}\s+[A-Za-z0-9.'-]+"
+    r"(?:\s+[A-Za-z0-9.'-]+){0,4}\s+"
+    r"(?:street|st|avenue|ave|road|rd|boulevard|blvd|drive|dr|lane|ln|"
+    r"court|ct|place|pl|parkway|pkwy|highway|hwy|way)"
+    r"(?![A-Za-z0-9])"
+)
 
 
 class DefaultMemoryPolicy:
@@ -143,11 +154,16 @@ def _looks_like_secret_content(content: str) -> bool:
 
 
 def _content_admission_reason(content: str) -> AdmissionReason | None:
-    """Apply deterministic defense-in-depth before trusting an extractor label."""
+    """Apply limited deterministic defense-in-depth before trusting an extractor label."""
 
     if _looks_like_secret_content(content):
         return AdmissionReason.SECRET_CONTENT_NOT_ALLOWED
-    if _SENSITIVE_CONTENT_PATTERN.search(content) is not None:
+    if (
+        _SENSITIVE_CONTENT_PATTERN.search(content) is not None
+        or _SSN_PATTERN.search(content) is not None
+        or _PHONE_PATTERN.search(content) is not None
+        or _STREET_ADDRESS_PATTERN.search(content) is not None
+    ):
         return AdmissionReason.SENSITIVE_CONTENT_NOT_ALLOWED
     return None
 

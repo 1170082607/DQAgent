@@ -113,6 +113,10 @@ separation, and the memory-disabled regression. Each case composes the productio
 admission, recall ranking, context selection, and answer utilization are reported as separate
 stages, so a passing answer cannot hide an upstream failure.
 
+The default policy also applies finite deterministic defense-in-depth checks for obvious credential,
+sensitive-term, SSN, telephone-number, and street-address patterns before confirmation. These checks
+are regression coverage for the local v1 boundary, not a complete PII classifier or compliance claim.
+
 The report includes false admission rate, `Recall@k`, `Precision@k`, scope leakage, stale/forgotten
 recall, harmful over-retrieval, correction compliance, memory context character/record counts,
 direct answer predicate pass rate, and explicit no-result correctness. `null` means a metric is not

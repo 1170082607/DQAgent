@@ -1,5 +1,6 @@
 """Model-free application service for explicit long-term memory management."""
 
+import hashlib
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -154,7 +155,9 @@ class MemoryEventMetadata:
                 "operation": self.operation.value,
                 "outcome": self.outcome.value,
                 "scope_kind": self.scope.kind.value,
-                "scope_id": self.scope.scope_id,
+                "scope_id_digest": hashlib.sha256(
+                    self.scope.scope_id.encode("utf-8")
+                ).hexdigest(),
                 "scope_revision": self.scope_revision,
                 "memory_id": self.memory_id,
                 "candidate_digest": self.candidate_digest,

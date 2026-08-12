@@ -126,6 +126,11 @@ def test_propose_is_transient_and_returns_policy_decision() -> None:
     assert preview.decision.requires_confirmation
     assert preview.metadata.outcome is MemoryOutcome.PROPOSED
     assert candidate.content not in str(preview.event_attributes)
+    assert "scope_id" not in preview.event_attributes
+    assert preview.event_attributes["scope_id_digest"] == hashlib.sha256(
+        USER_SCOPE.scope_id.encode("utf-8")
+    ).hexdigest()
+    assert USER_SCOPE.scope_id not in str(preview.event_attributes)
     assert store.load(USER_SCOPE) == MemoryScopeSnapshot(USER_SCOPE)  # type: ignore[union-attr]
 
 
@@ -154,6 +159,11 @@ def test_confirm_requires_the_exact_candidate_digest_and_has_content_free_error_
 
     assert error.value.operation == "confirm"
     assert error.value.candidate_digest == tampered.digest
+    assert "scope_id" not in error.value.event_attributes
+    assert error.value.event_attributes["scope_id_digest"] == hashlib.sha256(
+        USER_SCOPE.scope_id.encode("utf-8")
+    ).hexdigest()
+    assert USER_SCOPE.scope_id not in str(error.value.event_attributes)
     assert candidate.content not in str(error.value)
     assert candidate.content not in str(error.value.event_attributes)
     assert store.load(USER_SCOPE) == MemoryScopeSnapshot(USER_SCOPE)  # type: ignore[union-attr]
@@ -458,6 +468,27 @@ class FailingStore:
 
     def apply(self, change_set: object, *, expected_revision: int) -> MemoryScopeSnapshot:
         raise RuntimeError("store failure with an accidental payload")
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "My SSN is 123-45-6789.",
+        "Call me at 555-123-4567.",
+        "I live at 12 Main Street.",
+    ],
+)
+def test_obvious_pii_is_denied_before_confirmation_and_never_stored(content: str) -> None:
+    service, _, store = make_service()
+    candidate = make_candidate(content=content)
+
+    preview = service.preview(candidate, scope=USER_SCOPE)
+
+    assert preview.decision.action is AdmissionAction.DENY
+    assert preview.decision.reason is AdmissionReason.SENSITIVE_CONTENT_NOT_ALLOWED
+    with pytest.raises(MemoryAdmissionDeniedError):
+        service.confirm(candidate, candidate.digest, scope=USER_SCOPE)
+    assert store.load(USER_SCOPE) == MemoryScopeSnapshot(USER_SCOPE)  # type: ignore[union-attr]
 
 
 @pytest.mark.parametrize("operation", ["list", "show", "correct", "forget"])

@@ -1,5 +1,6 @@
 """Stable error taxonomy exposed by DQAgent."""
 
+import hashlib
 from collections.abc import Mapping
 from enum import StrEnum
 from types import MappingProxyType
@@ -203,7 +204,7 @@ def _set_memory_service_metadata(
         {
             "operation": operation,
             "scope_kind": scope_kind,
-            "scope_id": scope_id,
+            "scope_id_digest": hashlib.sha256(scope_id.encode("utf-8")).hexdigest(),
             "memory_id": memory_id,
             "candidate_digest": candidate_digest,
             "reason": reason,
