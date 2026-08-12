@@ -12,9 +12,9 @@ experience selected by policy. Saving the transcript as memory would retain nois
 guesses; putting memory in the retrieval index would confuse personalization with external
 evidence and make consent, correction, expiry, and forgetting implicit.
 
-This ADR freezes the behavioral and ownership contract for the v1 design. It does not accept a
-particular Python class layout, public constructor, or SQLite table schema; those details must be
-validated by the later Phase 8 implementation tasks and tests.
+This ADR freezes the behavioral and ownership contract for the v1 design. Its implementation shape
+is now exercised by T5-T11, but the ADR remains Proposed because production privacy, authorization,
+tenancy, and scale requirements are not yet closed by evidence.
 
 ## Decision
 
@@ -35,10 +35,12 @@ adapters remain policy-neutral.
 - Extractors, including optional model-assisted extractors, have no storage access or mutation
   authority. The model may suggest candidates but cannot write records or invoke memory mutation as
   a tool.
-- Every durable write requires an exact preview and explicit user confirmation. Confirmation is
-  bound to the candidate content and scope that were shown. Secret and sensitive content is denied
-  in v1 because the local authoritative store is not encrypted; confidence is evidence about the
-  extractor, never truth or consent.
+- Every supported user-facing durable write requires an exact preview and explicit user confirmation.
+  The core service enforces the candidate content/scope digest supplied after preview; the standalone
+  CLI is the current implementation of the human confirmation step. A caller that invokes the service
+  directly must provide its own authorization UX, so the service cannot prove human intent from a
+  digest alone. Secret and sensitive content is denied in v1 because the local authoritative store is
+  not encrypted; confidence is evidence about the extractor, never truth or consent.
 - Correction creates a new record and atomically supersedes the selected old record. Ordinary
   confirmation cannot silently overwrite a conflicting active topic.
 
@@ -98,12 +100,15 @@ emitting into an already terminal chat run.
 
 ### Forgetting and deferred scope
 
-`forget` is an application-level deletion guarantee. It must remove the record payload and raw
-provenance from SQLite queries, inspection, and recall paths, and atomically leave only a minimal
-content-free tombstone needed for conflict/audit semantics. v1 has no persistent vector index, so a
-forgotten record cannot reappear through a stale derived index. SQLite `secure_delete` or equivalent
-local sanitization may be enabled as best effort, but DQAgent does not promise forensic erasure from
-filesystem blocks, WAL files, backups, snapshots, or other copies.
+`forget` is a logical application-level deletion guarantee for the active store. It removes the
+record payload and raw provenance from SQLite queries, inspection, and recall paths, and atomically
+leaves only a minimal content-free tombstone needed for conflict/audit semantics. v1 has no
+persistent vector index, so a forgotten record cannot reappear through a stale derived index.
+SQLite `secure_delete` is enabled in the current adapter as best-effort local sanitization, but
+DQAgent does not promise forensic erasure from filesystem blocks, WAL files, backups, snapshots, or
+other copies. If the target is a corrected replacement, the prior superseded history record is a
+separate lifecycle record and is not recursively erased; it remains inspection-only and is excluded
+from recall.
 
 Deferred until a later phase and measured evidence justify them: encrypted sensitive-memory storage;
 forensic deletion guarantees; persistent or managed vector indexes; unconfirmed or automatic model
@@ -142,19 +147,71 @@ Phase 8 does not change these existing dependency directions or observable behav
   CI gate; any model-assisted extraction or answer-utilization evaluation is separate from that
   gate (ADR-0004).
 
+## Implementation Evidence
+
+T5-T11 validate the contract through the production paths rather than test-only doubles:
+
+- `MemoryService` owns preview, exact digest revalidation, policy checks, deterministic
+  duplicate-refresh/topic-conflict consolidation, correction, expiry, forgetting, and request-time
+  recall. `tests/test_memory_service.py` covers stale previews, clock changes, policy denial, CAS
+  conflicts, fail-closed required operations, correction, expiry, and tombstones.
+- `SqliteMemoryStore` uses `BEGIN IMMEDIATE`, a scope revision compare-and-swap, one change-set
+  transaction, a unique active `(scope, kind, topic)` constraint, and separate records/tombstones.
+  `tests/test_memory_store.py` and the SQLite service smoke test cover cross-instance visibility,
+  rollback/error behavior, and concurrency. This is cross-connection optimistic concurrency, not a
+  distributed lease or tenant boundary.
+- `MemorySelector` does no persistent indexing. `MemoryService.recall` filters exact scope,
+  confirmation/lifecycle/expiry/sensitivity/kind eligibility before request-time hashing embeddings,
+  then applies deterministic score, count, kind, and character limits. `tests/test_memory_recall.py`
+  and `tests/test_session_memory_recall.py` cover ranking ties, no-result behavior, scope isolation,
+  stale/forgotten exclusion, and atomic selection.
+- `ContextBuilder` projects selected memory as a separate lower-authority untrusted user-data block
+  with its own budget. Current-request, mandatory prompt, RAG, and recent-turn priority remain
+  intact; memory payloads do not enter the durable transcript. `tests/test_context_memory.py` and
+  `tests/test_session_memory_recall.py` cover authority, injection-shaped content, RAG separation,
+  budget omission, event attributes, and the disabled-path checkpoint.
+- `SessionAgentApplication` orders retrieval -> optional memory recall -> context -> runtime ->
+  session CAS. Typed memory dependency errors fall back without memory; cancellation, deadlines,
+  and unexpected failures escape to the coordinator. The session memory integration tests cover
+  those failure paths and assert that a failed session CAS does not write memory.
+- `MemoryExtractor` accepts one store-issued, committed, bounded session turn and returns transient
+  candidates only. The model path has no tools or store access, derives provenance from the typed
+  source, and sends candidates through preview; `tests/test_memory_extraction.py` covers malformed
+  output, tool calls, hallucinated provenance, source injection, cancellation, deadline, and
+  zero-write failure behavior. ADR-0010 remains the detailed extraction boundary.
+- `evaluations/cases/phase-8-memory-v1.json` contains 13 cases and
+  `evaluations/baselines/phase-8-memory-deterministic-v1.json` records the production-path result:
+  13/13 passed, false admission 0/3, mean `Recall@k` and `Precision@k` 1.0 over seven applicable
+  cases, scope leakage 0/1, stale/forgotten recall 0/3, harmful over-retrieval 0/2, correction
+  compliance 1/1, no-result correctness 12/12, and direct answer predicates 13/13. This evidence
+  is deterministic fixture regression evidence, not an LLM quality or compliance certification.
+
+The implementation refines two v1 statements. First, "explicit confirmation" is enforced as an
+exact digest at the service boundary and as interactive confirmation in `dqagent-memory`; arbitrary
+callers are responsible for their own human authorization. Second, forgetting is logical deletion
+from the application-visible store with a tombstone, not forensic erasure. These are limitations of
+the current evidence, not capabilities to infer from the interface.
+
 ## Consequences
 
 - Long-term state has explicit scope, consent, provenance, lifecycle, correction, and deletion
   boundaries without weakening transcript or retrieval contracts.
 - Query-time ranking is simple and immediately reflects correction, expiry, and forgetting, but it
-  is O(N) over eligible records and is suitable only for the initial small local set.
-- SQLite introduces schema/version and local-file privacy responsibilities, while providing the
-  multi-record transactions and cross-process concurrency that JSON whole-file replacement cannot
-  guarantee for memory.
+  is O(N) over eligible records with transient vectors and is suitable only for the initial small
+  local set. The current hashing embedding is lexical feature hashing, not semantic memory quality.
+- SQLite introduces schema/version and local-file privacy responsibilities. The adapter provides
+  atomic change sets and cross-connection optimistic concurrency, but not distributed leases,
+  tenant isolation, encryption, backup control, or forensic deletion.
 - Optional recall can improve personalization without reducing core chat availability, while the
   narrow catch boundary preserves cancellation, deadline, and programming-error visibility.
-- The local store remains unencrypted and cannot satisfy compliance-grade deletion or sensitive-data
-  requirements. Those limitations are intentional v1 scope, not production guarantees.
+- Memory context is untrusted lower-authority user data. Delimiting it protects the authority model
+  in the harness, but it is not a hard prompt-injection boundary and the current answer checks are
+  lexical predicates.
+- The current extraction boundary prevents automatic writes, but it does not establish extraction
+  truth, user intent, or a background consolidation service. Those remain explicit, deferred work.
+- The local store remains unencrypted and cannot satisfy compliance-grade sensitive-data or deletion
+  requirements; corrected superseded history is also retained as an inspection-only lifecycle
+  record. These limitations are intentional v1 scope, not production guarantees.
 
 ## Alternatives Considered
 
@@ -191,3 +248,17 @@ in place for their existing responsibilities.
 Rejected because the initial memory set is expected to be small and request-time ranking is enough to
 measure the contract. A persistent derived index would add dual-write, stale-index repair,
 migration, and deployment costs before profiling demonstrates a need.
+
+### Treat a successful digest as proof of user authorization
+
+Rejected as a system guarantee because a digest proves that the candidate supplied at confirmation
+matches the candidate shown; it does not prove that a human approved it. The CLI currently supplies
+the interactive confirmation boundary, while the service keeps the content-binding invariant.
+
+## Explicitly Deferred
+
+The current evidence does not support encrypted sensitive-memory storage, forensic erase,
+persistent memory vector indexes, unconfirmed or automatic writes, distributed tenancy or leases,
+background consolidation, bulk deletion, durable audit delivery, or any broader capability not
+covered by the Phase 8 deterministic contract. These are deferred rather than implied by the v1
+interfaces.

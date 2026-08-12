@@ -2,11 +2,11 @@
 
 ## Status
 
-This document describes the implemented Phase 8 T11 architecture. Memory management is available as
-a model-free explicit application service, request-time policy-filtered recall, an optional durable
-session read stage, a bounded context projection, a pure source-to-transient-candidate extraction
-boundary, and independent memory/session CLI composition. Automatic memory writes, hard execution
-isolation, and other future capabilities remain in the [roadmap](roadmap.md).
+This document describes the implemented Phase 8 T5-T11 architecture as documented by T12. Memory
+management is available as a model-free explicit application service, request-time policy-filtered
+recall, an optional durable session read stage, a bounded context projection, a pure
+source-to-transient-candidate extraction boundary, and independent memory/session CLI composition.
+The roadmap remains the source of truth for deferred capabilities; Phase 8 is still in progress.
 
 ## System Context
 
@@ -81,6 +81,73 @@ Workflow definitions are application composition. `WorkflowRunner` executes know
 persists progress through a `CheckpointStore`; an agent runtime may be called inside a node when a
 step genuinely needs model decisions, but workflow transitions remain deterministic.
 
+## Phase 8 Memory Data Flow
+
+Memory has separate write and read paths. The write path is an explicit management operation; the
+chat path only performs an optional read. Neither path treats the model as durable-state authority:
+
+```text
+committed session turn or user draft
+    -> MemoryExtractor (optional, transient candidates only)
+    -> MemoryService.preview / policy admission
+    -> exact candidate + digest shown to caller
+    -> explicit confirmation
+    -> MemoryService rechecks scope, policy, clock, and digest
+    -> MemoryConsolidator (add, duplicate refresh, or explicit conflict)
+    -> MemoryStore exact-scope CAS transaction
+    -> confirmed MemoryRecord / content-free tombstone
+
+current request + explicit MemoryScope
+    -> MemoryService.recall
+    -> exact-scope snapshot
+    -> policy/lifecycle/sensitivity/kind eligibility
+    -> request-time embedding and deterministic ranking
+    -> score/count/kind/character post-limits
+    -> MemoryRecall selected or atomically omitted records
+    -> ContextBuilder lower-authority untrusted user-data block
+    -> AgentRuntime model/tool stage
+    -> SessionStore CAS of user message and new agent items only
+```
+
+The extraction branch is not attached automatically to a successful chat turn. T10's
+`CommittedSessionTurn` is store-issued, selects one complete bounded turn, and contains source
+digest/revision metadata rather than a copy of the full transcript. `ModelMemoryExtractor` sends no
+tools, rejects non-JSON/unknown/provenance-shaped output, and produces only transient candidates.
+`MemoryExtractionPipeline` can preview those candidates but cannot confirm them.
+
+The read branch is exact-scope and request-time. `MemoryService` loads the scope, rejects records
+that are not confirmed durable active records or that are superseded, expired, not-yet-valid,
+sensitive/secret, or outside the allowed kind set, then invokes `MemorySelector`. The v1 selector
+uses the existing provider-neutral embedding boundary but persists no memory vectors. It ranks by
+dot product with deterministic memory-ID ties and admits complete records until score, count, kind,
+or character limits are reached. An empty recall is a successful no-result, not a storage failure.
+
+`ContextBuilder` receives the completed `MemoryRecall`; it never queries the store. It places selected
+memory in a separate `USER` block marked `untrusted_data=true` and `authority=lower-authority`.
+Current-request text, mandatory prompt policy, RAG evidence, and required recent turns retain their
+existing authority and priority. Memory has an independent character budget, records are omitted
+atomically, and memory content is excluded from system instructions, summaries, RAG passages, and
+the durable session transcript. This delimiter is an authority convention, not a hard prompt-
+injection sandbox.
+
+The current evidence supports the following transaction boundary:
+
+- `MemoryService` decides the change set; `MemoryStore` does not infer policy or consolidation.
+- `SqliteMemoryStore.apply` opens `BEGIN IMMEDIATE`, loads the exact scope revision, rejects a
+  stale expected revision, applies one validated change set, rewrites records/tombstones for that
+  scope, and commits or rolls back as one SQLite transaction.
+- SQLite has a unique active `(scope_kind, scope_id, kind, topic)` index. Correction atomically
+  supersedes the target and inserts the replacement. Forget atomically removes the record payload
+  and raw provenance and inserts only a content-free tombstone.
+- `PRAGMA secure_delete = ON` is enabled as best-effort local sanitization. It is not a forensic
+  erase promise and does not cover backups, snapshots, WAL/filesystem remnants, or external copies.
+
+The in-memory adapter is thread-safe for its process-local contract. SQLite supplies cross-connection
+transactional CAS with a bounded busy timeout, not a distributed lease. A session owner can still
+do model/tool work from a stale session revision and lose the final session CAS; the completed run
+and any external tool effects are not rolled back. Distributed tenancy, leases, and exactly-once
+side effects remain outside this architecture.
+
 ## Responsibility Boundaries
 
 `AgentApplication` owns a conversation. It adds a user message to pending history, calls the runtime,
@@ -140,6 +207,12 @@ expiry into the record lifecycle. `correct` requires an explicit target ID and c
 old record plus a new record in one store change set. `forget` requires the exact scope and ID and
 leaves only a content-free tombstone.
 
+The service's digest check binds confirmation to the exact candidate shown; it does not by itself
+prove that a human approved the operation. The current CLI supplies the interactive `yes`/`confirm`
+step. Direct service callers own their authorization UX. Forgetting a corrected replacement removes
+that target's payload and provenance, but does not recursively erase a prior superseded history
+record; superseded records remain inspection-only and are excluded from recall.
+
 `CommittedSessionTurn` is the extraction source boundary. It is created from one committed,
 complete, bounded session turn and retains only that turn, its digest, revision, and bound metadata.
 `MemoryExtractor` has no store access. `DeterministicMemoryExtractor` consumes explicit fixtures;
@@ -169,6 +242,14 @@ explicit result. Scores describe query relevance only; they do not establish tru
 consent. Eligibility, request-time embedding, and score computation are O(N) in the number of
 eligible records with O(N) transient vector storage; the complete deterministic ordering adds the
 usual O(N log N) comparison cost. There is no persistent vector index.
+
+These boundaries are also the privacy boundary. The SQLite file is local and unencrypted; sensitive
+and secret candidates are denied before storage under the default policy and service-owned hard
+checks. Scope IDs are explicit inputs and recall results must match the requested scope. Memory
+payloads can appear in explicit management output and model context by design, but not in run event
+attributes or sanitized service errors. Event attributes use a scope digest for recall requests;
+memory IDs and bounded counts identify selected results without copying their content. The CLI
+escapes non-printable text and keeps dependency failures off stderr payloads.
 
 The memory CLI previews remember/correct candidates through a process-local, non-persistent service.
 It prints the exact candidate fields and digest, then accepts only `yes` or `confirm`; a rejection or
@@ -547,6 +628,7 @@ MemorySelector -> EmbeddingProvider
 MemoryExtractionPipeline -> MemoryExtractor + MemoryService
 DeterministicMemoryExtractor -> committed bounded source + explicit fixture
 ModelMemoryExtractor -> RunCoordinator + LLMClient + neutral models + jsonschema
+SqliteMemoryStore -> sqlite3 + local filesystem
 ```
 
 - Session state is owned above the runtime; one run cannot commit partial history.
@@ -567,6 +649,11 @@ ModelMemoryExtractor -> RunCoordinator + LLMClient + neutral models + jsonschema
 - Memory candidates are transient; there is no persistent pending-candidate queue. Recall is not
   connected to retrieval ranking or chat orchestration. ContextBuilder accepts only the completed
   `MemoryRecall` projection and does not perform store access, eligibility, or ranking.
+- MemoryStore is policy-neutral and executes only validated exact-scope change sets. `SqliteMemoryStore`
+  owns schema, transaction, CAS, and serialization concerns, not consent, sensitivity, ranking,
+  or consolidation decisions.
+- The current store boundary is local privacy and logical deletion. It is not encryption, forensic
+  erasure, distributed tenancy, or durable audit delivery.
 
 ## Configuration
 
@@ -611,7 +698,10 @@ the runtime's model-attempt budget and defaults to three. All values are validat
   lower-authority memory projection, disabled-path regression, CLI composition, and no memory write
   on session CAS failure.
 - CI runs Ruff, strict mypy, and pytest with at least 85% coverage.
-- CI also runs the credential-free deterministic behavioral suite after implementation tests.
+- CI also runs the credential-free deterministic behavioral, context, retrieval, and Phase 8 memory
+  suites after implementation tests. The Phase 8 report uses the production memory/session path,
+  temporary SQLite databases, deterministic hashing embeddings, scripted extraction, and scripted
+  answers; it is a regression gate, not an LLM quality or compliance certification.
 
 No live model evaluation runs in CI because credentials, cost, provider drift, and network
 nondeterminism make it an unsuitable correctness gate.
@@ -631,7 +721,11 @@ nondeterminism make it an unsuitable correctness gate.
 - Memory management, request-time recall, and bounded recall/context projection are explicit and
   cross-session through the service, stores, selector, ContextBuilder, and `dqagent-memory` CLI;
   extraction is also explicit through `MemoryExtractor` and is not integrated as automatic chat
-  behavior.
+  behavior. The store is unencrypted, logical forget is not forensic erase, corrected superseded
+  history is not recursively erased, and direct service calls do not prove human authorization.
+- Encrypted sensitive-memory storage, forensic erase, persistent memory vector indexing, unconfirmed
+  or automatic writes, distributed tenancy/leases, background consolidation, bulk deletion, and
+  unsupported capabilities remain deferred. No current test or evaluation justifies claiming them.
 - The retrieval store is small, synchronous, single-process, and brute-force. Hashing embeddings are
   lexical, exact digest deduplication misses near-duplicates, and answer checks use explicit lexical
   claims rather than a semantic or LLM-based judge.
@@ -660,5 +754,6 @@ nondeterminism make it an unsuitable correctness gate.
 - [Phase 5 LangGraph and EINO Workflow Comparison](learning/phase-5-langgraph-eino-workflow-comparison.md)
 - [Phase 6 Session and Context Comparison](learning/phase-6-session-context-comparison.md)
 - [Phase 7 Retrieval Framework Comparison](learning/phase-7-retrieval-framework-comparison.md)
+- [Phase 8 Memory Framework Comparison](learning/phase-8-memory-framework-comparison.md)
 - [ADR-0009: Policy-Governed Long-Term Memory](adr/0009-policy-governed-long-term-memory.md)
 - [ADR-0010: Keep Memory Extraction Before Deterministic Admission](adr/0010-transient-memory-extraction-boundary.md)

@@ -4,10 +4,11 @@ DQAgent is an engineering-first learning project for building AI Agent capabilit
 from foundational components. Its purpose is to understand the design of production-oriented agent
 systems instead of treating frameworks as black boxes.
 
-**Status:** Pre-alpha. Phase 8 T11 is implemented: DQAgent supports durable bounded sessions,
-explicit local RAG, optional exact-scope read-only memory recall, and explicit source-to-transient-
-candidate extraction with provider-neutral boundaries, citation/memory provenance, and deterministic
-regression evaluations.
+**Status:** Pre-alpha. Phase 8 T12 documentation is delivered: T5-T11 are implemented and
+evaluated. DQAgent supports durable bounded sessions, explicit local RAG, optional exact-scope
+read-only memory recall, and explicit source-to-transient-candidate extraction with provider-neutral
+boundaries, citation/memory provenance, and deterministic regression evaluations. Phase 8 remains
+in progress.
 
 ## Goals
 
@@ -27,7 +28,7 @@ regression evaluations.
 - Add abstractions for roadmap stages that have not been implemented.
 - Treat workflow graphs, prompt chains, or additional agents as substitutes for model capability.
 
-## Phase 7 Capabilities
+## Implemented Capabilities
 
 - Interactive and one-shot command-line chat.
 - In-memory conversation history with optional system prompts.
@@ -96,10 +97,12 @@ regression evaluations.
 - Environment-based configuration with explicit validation.
 - Unit tests, Ruff linting, mypy strict type checking, and GitHub Actions CI.
 
-Automatic memory writes, streaming, hard execution isolation, approval policy, distributed
-session/workflow leases, durable telemetry delivery, LLM-as-judge, and repeated live-model sampling
-remain deferred. Evaluation, security, durability, and observability remain continuous constraints
-for later phases.
+The implemented memory path does not automatically write candidates from chat. Encrypted sensitive
+memory storage, forensic erase, a persistent memory vector index, unconfirmed automatic writes,
+distributed tenancy or leases, background consolidation, streaming, hard execution isolation,
+approval policy, durable telemetry delivery, LLM-as-judge, repeated live-model sampling, and other
+capabilities not supported by the current evidence remain deferred. Evaluation, security,
+durability, and observability remain continuous constraints for later phases.
 
 ## Installation
 
@@ -262,6 +265,33 @@ no bulk-clear command and no `--yes` bypass. Successful output is stdout, saniti
 stderr, and the CLI never reads `DQAGENT_MODEL`, provider credentials, or a session ID to choose
 the memory scope.
 
+The management CLI is the user-visible write/inspection boundary. `list` shows active, superseded,
+and expired records plus content-free forgetting tombstones; `show` reads one exact scope and ID.
+The core service also supports transient proposal/preview, exact candidate-digest confirmation,
+correction, forgetting, expiry materialization, and request-time recall. It does not provide a
+general-purpose human authorization primitive: callers that bypass the CLI must supply their own
+confirmation UX and must preserve the exact preview/digest contract. Forgetting a corrected
+replacement does not recursively erase the prior superseded history record; that record remains
+inspection-only and is excluded from recall.
+
+Enable read-only memory recall for a durable session by supplying the same exact scope on each
+process. This reads confirmed, eligible records at request time and does not write memory:
+
+```bash
+dqagent --session-id learning-1 \
+  --memory-database .local/memory.sqlite3 \
+  --memory-scope-kind user --memory-scope-id user-7 \
+  --message "What response style should I use?"
+```
+
+Memory recall is disabled unless all three memory options are provided with a durable session. The
+query uses a small local hashing embedding, exact scope isolation, policy/lifecycle filtering,
+score/count/kind/character limits, and atomic whole-record selection. An empty result is successful
+and means no eligible record cleared the request-time filters; it is not evidence that no fact exists.
+Recalled records are transient lower-authority user data and are never appended to the session
+transcript or treated as RAG citations. A typed memory dependency failure falls back to a run without
+memory; cancellation, deadline exhaustion, and unexpected failures still fail the run.
+
 Run the separate answer-level RAG suite with the configured live provider. Repeat it before drawing
 model-quality conclusions:
 
@@ -328,6 +358,7 @@ pytest
 dqagent-eval --mode deterministic
 dqagent-context-eval
 dqagent-retrieval-eval
+dqagent-memory-eval
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for change guidelines.

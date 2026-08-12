@@ -296,6 +296,18 @@ meet this phase's objective.
 - [x] Keep deterministic fixtures as the CI gate and document that hashing embeddings and scripted
   answers prove architecture regression only; no LLM-as-judge or credentialed live gate is required.
 
+**T12 delivered:**
+
+- [x] Update README, architecture, evaluation semantics, and ADR-0009 from implemented test and
+  deterministic evaluation evidence without changing Phase 8 status or accepting the Proposed ADR.
+- [x] Record actual inspection, correction, forgetting, recall, safe-default, transaction,
+  concurrency, failure, privacy, authority, and observability behavior, including explicit limits.
+- [x] Add a pinned-source comparison with LangGraph Store and Letta that separates reusable
+  principles from framework mechanics and documents where the analogies fail.
+- [x] Keep encrypted sensitive storage, forensic erase, persistent memory vector indexing,
+  unconfirmed/automatic writes, distributed tenancy, background consolidation, and unsupported
+  capabilities deferred.
+
 ### Phase 9: Coding Agent Harness and Safety
 
 **Status:** Planned

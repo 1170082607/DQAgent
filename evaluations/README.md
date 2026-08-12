@@ -104,21 +104,36 @@ credential-free long-term memory regression suite and baseline. Run them with:
 dqagent-memory-eval --output .local/evaluations/memory-report.json
 ```
 
-Each case composes the production `MemoryService`, `DefaultMemoryPolicy`, SQLite memory store,
-`MemorySelector`, `ContextBuilder`, and `SessionAgentApplication`. Only the extractor and answer
-LLM are scripted fixtures. Write admission, recall ranking, context selection, and answer
-utilization are reported as separate stages, so a passing answer cannot hide an upstream failure.
+The v1 suite has 13 cases covering confirmed cross-session preference, assistant false inference,
+current-request precedence, correction, expiry, forgetting, exact scope isolation, sensitive/secret
+denial, irrelevant no-result, harmful over-retrieval, instruction-shaped memory, RAG/citation
+separation, and the memory-disabled regression. Each case composes the production `MemoryService`,
+`DefaultMemoryPolicy`, SQLite memory store, `MemorySelector`, `ContextBuilder`, and
+`SessionAgentApplication`. Only the extractor and answer LLM are scripted fixtures. Write
+admission, recall ranking, context selection, and answer utilization are reported as separate
+stages, so a passing answer cannot hide an upstream failure.
 
 The report includes false admission rate, `Recall@k`, `Precision@k`, scope leakage, stale/forgotten
-recall, harmful over-retrieval, correction compliance, memory context character/record counts, and
-direct answer predicate pass rate. `null` means a metric is not applicable because its denominator
-is zero; the report also includes an explicit no-result correctness metric whose denominator includes
-enabled-memory recall cases with both expected-result and expected-no-result outcomes. Disabled-memory
-controls are marked not applicable and excluded from that denominator. Direct predicates are exact
-lexical checks; there is no LLM-as-judge.
+recall, harmful over-retrieval, correction compliance, memory context character/record counts,
+direct answer predicate pass rate, and explicit no-result correctness. `null` means a metric is not
+applicable because its denominator is zero. No-result correctness covers enabled-memory cases with
+both expected-result and expected-no-result outcomes; disabled-memory controls are excluded from
+that denominator. Direct answer and citation checks are exact lexical predicates; there is no
+LLM-as-judge.
 
-The baseline proves deterministic architecture and regression behavior only. Its hashing embedding
-is lexical feature hashing, and its scripted answer is not evidence of production model quality.
-The suite records extractor, prompt, policy, selector, store, context, session, and answer
-identities. Any future live extraction/answer mode must remain a separate non-CI report with model,
-prompt, policy, and selector identities recorded; the current gate does not require credentials.
+The committed v1 baseline reports 13/13 passed, false admission `0.0` (0/3), mean `Recall@k`
+`1.0` (7 applicable cases), mean `Precision@k` `1.0` (7 applicable cases), scope leakage `0.0`
+(0/1), stale/forgotten recall `0.0` (0/3), harmful over-retrieval `0.0` (0/2), correction
+compliance `1.0` (1/1), no-result correctness `1.0` (12 applicable cases), direct answer predicate
+pass rate `1.0` (13/13), and mean projected memory context of 366.17 characters across 12 enabled
+cases. These are fixture-corpus and architecture-regression measurements, not general memory
+quality claims.
+
+The deterministic/live boundary is intentional. The current Phase 8 gate always uses the real
+production memory/session path with a temporary SQLite store, deterministic hashing embeddings,
+scripted extraction fixtures, and scripted answers. It needs no credentials or network and proves
+schema, policy, transaction, ranking, context, event, and evaluator regression behavior. It does not
+prove an LLM can extract true facts or use memory well. There is currently no live Phase 8 mode;
+adding one would require a separate non-CI report with model, prompt, extraction, policy, selector,
+store, context, session, and answer identities, repeated samples, and calibrated expectations.
+The current gate does not require credentials.
