@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-07-23
+- Effectful invocation amended by: [ADR-0011](0011-govern-tool-actions-before-side-effects.md)
+- Workspace and subprocess boundaries extended by: [ADR-0012](0012-separate-workspace-containment-from-process-isolation.md)
 
 Phase 3's ADR-0003 supersedes only the decision that `AgentApplication` owns the loop. The tool
 contract, loop semantics, and commit-after-success behavior remain accepted.

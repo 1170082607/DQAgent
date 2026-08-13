@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-07-30
+- Mutable repository resource authority clarified by: [ADR-0013](0013-load-repository-resources-through-context.md)
 
 ## Context
 

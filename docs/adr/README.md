@@ -32,3 +32,6 @@ Start from [0000-template.md](0000-template.md).
 - [ADR-0008: Coordinate the End-to-End Run Above AgentRuntime](0008-coordinate-end-to-end-run-above-agent-runtime.md)
 - [ADR-0009: Policy-Governed Long-Term Memory](0009-policy-governed-long-term-memory.md)
 - [ADR-0010: Keep Memory Extraction Before Deterministic Admission](0010-transient-memory-extraction-boundary.md)
+- [ADR-0011: Govern Tool Actions Before Side Effects](0011-govern-tool-actions-before-side-effects.md)
+- [ADR-0012: Separate Workspace Containment from Process Isolation](0012-separate-workspace-containment-from-process-isolation.md)
+- [ADR-0013: Load Repository Instructions and Skills Through Context](0013-load-repository-resources-through-context.md)

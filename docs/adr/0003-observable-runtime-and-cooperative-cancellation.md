@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-07-23
 - Lifecycle ownership amended by: [ADR-0008](0008-coordinate-end-to-end-run-above-agent-runtime.md)
+- Subprocess isolation extended by: [ADR-0012](0012-separate-workspace-containment-from-process-isolation.md)
 
 ## Context
 
