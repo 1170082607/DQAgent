@@ -354,7 +354,9 @@ The coding composition allowlists its four coding tool names and rejects registe
 legacy handler path. Existing Phase 2/3 tools retain their handler and worker-thread timeout behavior
 outside this composition. `AgentRuntime` may pass a small provider-neutral execution context with
 `RunContext` and stage-event emission, but it must not import workspace, policy, approval, hook,
-subprocess, or repository-resource types.
+subprocess, or repository-resource types. Direct governed registry dispatch requires the explicit
+run-scoped `ToolExecutionContext`; if it is omitted, the registry fails closed rather than creating
+a per-call collector.
 
 No side-effecting executor is automatically retried. Provider retry remains limited to model
 requests made before a completion is accepted.

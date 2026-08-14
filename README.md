@@ -36,6 +36,8 @@ evaluations. Phase 8 is complete within its documented v1 scope.
 - An OpenAI Responses API adapter.
 - A llama.cpp `llama-server` adapter using its OpenAI-compatible Chat Completions endpoint.
 - JSON Schema tool definitions and an explicit tool registry.
+- Explicit governed action tools with bounded raw arguments, fixed authorization ordering,
+  at-most-once execution, sanitized stage events, and private bounded action-record retention.
 - A bounded model/tool/observation loop with repeated-call protection.
 - Structured recovery observations for invalid arguments, unknown tools, timeouts, and tool errors.
 - Built-in `current_time` and deterministic `get_weather` demonstration tools.

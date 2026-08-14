@@ -2,13 +2,13 @@
 
 ## Status
 
-This document describes the implemented Phase 8 T5-T13 architecture and the Phase 9 T1-T4
+This document describes the implemented Phase 8 T5-T13 architecture and the Phase 9 T1-T5
 foundations. Memory management is available as a model-free explicit application service,
 request-time policy-filtered recall, an optional durable session read stage, a bounded context
 projection, a pure source-to-transient-candidate extraction boundary, and independent memory/session
 CLI composition. Phase 9 currently has workspace authority/observation, prepared-action governance,
-exact foreground approval, and synchronous hook contracts; governed executors and subprocess backends
-remain later checkpoints.
+exact foreground approval, synchronous hook contracts, and a governed execution/runtime bridge;
+coding adapters and subprocess backends remain later checkpoints.
 The roadmap remains the source of truth for deferred capabilities.
 
 ## System Context
@@ -21,7 +21,7 @@ model, executes application-owned tools, and continues until it produces a resul
 ```text
 User -> CLI -> AgentApplication -> RunCoordinator -> AgentRuntime -> LLMClient
                                       |                |
-                                      |                +-> ToolRegistry -> tool handler
+                                      |                +-> ToolRegistry -> legacy handler or governed ActionTool
                                       |
                                       +-> RunContext + RunScope
                                       +-> EventSink adapters
@@ -177,8 +177,13 @@ active context, persist conversation state, or own the surrounding run lifecycle
 `RunContext` carries data and control signals shared by all work in one run: run ID, start time,
 deadline, cancellation, and read-only metadata.
 
-`ToolRegistry` validates untrusted model arguments and invokes context-aware handlers. Provider
-adapters translate provider-neutral values and classify transport failures.
+`ToolRegistry` validates untrusted model arguments and invokes context-aware legacy handlers or
+explicit `ActionTool` adapters. Governed adapters apply a pre-parse byte bound, fixed preparation,
+guard, policy, approval, revalidation, hook, at-most-once executor, and bounded observation path.
+The runtime passes only a provider-neutral `ToolExecutionContext` carrying `RunContext` and stage
+event emission; it does not import governance domain types. Legacy handlers retain their existing
+worker-thread timeout behavior. Provider adapters translate provider-neutral values and classify
+transport failures.
 
 The built-in registry exposes `current_time` and `get_weather`. `current_time` reads the local clock
 for a validated UTC offset. `get_weather` is a deterministic tool-calling demonstration: it validates
@@ -637,8 +642,9 @@ ModelMemoryExtractor -> RunCoordinator + LLMClient + neutral models + jsonschema
 SqliteMemoryStore -> sqlite3 + local filesystem
 WorkspaceObserver -> Workspace + contained non-following filesystem traversal
 WorkspaceDiff -> immutable WorkspaceSnapshot + bounded unified projection
-  Governed action -> PreparedAction -> hard guards -> tri-state ActionPolicy
-                 -> exact ApprovalRequest/ApprovalDecision -> ordered hooks
+  Governed action -> bounded parse/schema -> PreparedAction -> hard guards -> tri-state ActionPolicy
+                 -> exact ApprovalRequest/ApprovalDecision -> revalidation -> ordered hooks
+                 -> effect-boundary revalidation -> at-most-once executor -> bounded result/record
   PreparedAction -> Workspace + subprocesses.IsolationCapability
 ```
 
@@ -690,6 +696,15 @@ WorkspaceDiff -> immutable WorkspaceSnapshot + bounded unified projection
   post-hook failure is visible without changing effect evidence. Hooks are synchronous trusted
   extensions; they are not `EventSink` instances and receive no workspace, subprocess, or executor
   capability.
+- Phase 9 T5 keeps the governed path explicit beside legacy tools. Governed raw argument bytes are
+  bounded before JSON parsing, reserved coding names cannot be registered as legacy handlers, and
+  the runtime bridge carries only `RunContext` plus stage-event emission. A private synchronous
+  run-scoped collector retains at most `max_governed_calls` bounded `ActionRecord` values for the
+  exact active run; collector mismatch/failure is an observation failure, while event sinks remain
+  best effort. Side-effecting executors are called at most once and are never retried by the
+  runtime. Direct governed registry dispatch must receive that run's explicit
+  `ToolExecutionContext`; omission fails closed instead of creating a per-call collector. This
+  collector is not a public journal and provides no persistence, replay, or recovery.
 
 ## Configuration
 

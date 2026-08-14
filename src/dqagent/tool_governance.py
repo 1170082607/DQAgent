@@ -44,6 +44,7 @@ __all__ = [
     "ActionHookInput",
     "CANONICAL_ACTION_VERSION",
     "ActionKind",
+    "ActionExecutionResult",
     "ActionPolicy",
     "ActionRecord",
     "ApprovalDecision",
@@ -99,6 +100,7 @@ _MAX_DISPLAY_CHARACTERS = 4_096
 _MAX_RECORD_DIAGNOSTICS = 8
 _MAX_RECORD_TEXT_CHARACTERS = 512
 _MAX_RECORD_GUARDS = 7
+_MAX_RECORD_HOOK_RESULTS = 33
 _MAX_REASON_CHARACTERS = 160
 _DEFAULT_INPUT_CHARACTERS = 64_000
 _DEFAULT_OUTPUT_CHARACTERS = 32_000
@@ -182,6 +184,27 @@ class EffectState(StrEnum):
     PARTIAL = "partial"
     COMPLETE = "complete"
     UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True, slots=True)
+class ActionExecutionResult:
+    """Bounded executor output separated from the model-visible observation."""
+
+    output: str
+    effect_state: EffectState = EffectState.COMPLETE
+    diagnostics: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.output, str) or not self.output.strip():
+            raise ValueError("action execution output must be non-empty text")
+        if not isinstance(self.effect_state, EffectState):
+            raise TypeError("action execution effect state must be an EffectState")
+        if not isinstance(self.diagnostics, tuple):
+            raise TypeError("action execution diagnostics must be a tuple of strings")
+        if len(self.diagnostics) > _MAX_RECORD_DIAGNOSTICS:
+            raise ValueError("action execution diagnostics exceed the record bound")
+        if any(not isinstance(item, str) for item in self.diagnostics):
+            raise TypeError("action execution diagnostics must contain strings")
 
 
 class GuardName(StrEnum):
@@ -890,6 +913,11 @@ class ActionRecord:
     sanitized_diagnostics: tuple[str, ...] = ()
     action_display_truncated: bool = False
     diagnostics_truncated: bool = False
+    approval_outcome: ApprovalOutcome | None = None
+    approval_reason: str | None = None
+    pre_hook_results: tuple[HookResult, ...] = ()
+    post_hook_results: tuple[HookResult, ...] = ()
+    observation_failure: bool = False
 
     def __post_init__(self) -> None:
         if (
@@ -956,6 +984,27 @@ class ActionRecord:
             self.diagnostics_truncated, bool
         ):
             raise TypeError("record truncation flags must be booleans")
+        if self.approval_outcome is not None and not isinstance(
+            self.approval_outcome, ApprovalOutcome
+        ):
+            raise TypeError("approval outcome must be an ApprovalOutcome or None")
+        if self.approval_reason is not None:
+            _validate_text(
+                "approval reason",
+                self.approval_reason,
+                maximum=_MAX_RECORD_TEXT_CHARACTERS,
+                allow_controls=True,
+            )
+        for label, values in (
+            ("pre-hook results", self.pre_hook_results),
+            ("post-hook results", self.post_hook_results),
+        ):
+            if not isinstance(values, tuple) or len(values) > _MAX_RECORD_HOOK_RESULTS:
+                raise ValueError(f"{label} exceed the record bound")
+            if any(not isinstance(value, HookResult) for value in values):
+                raise TypeError(f"{label} must contain HookResult values")
+        if not isinstance(self.observation_failure, bool):
+            raise TypeError("observation failure must be a boolean")
 
     @property
     def diagnostics(self) -> tuple[str, ...]:
@@ -975,6 +1024,10 @@ class ActionRecord:
         effect_state: EffectState = EffectState.NONE,
         diagnostics: Iterable[str] = (),
         max_text_characters: int = _MAX_RECORD_TEXT_CHARACTERS,
+        approval_decision: ApprovalDecision | None = None,
+        pre_hook_results: tuple[HookResult, ...] = (),
+        post_hook_results: tuple[HookResult, ...] = (),
+        observation_failure: bool = False,
     ) -> ActionRecord:
         """Build a bounded record while keeping raw display data out of it."""
 
@@ -1022,6 +1075,13 @@ class ActionRecord:
             sanitize(decision.policy_decision.reason)[0],
             sanitize(decision.policy_decision.policy_identity)[0],
         )
+        approval_outcome: ApprovalOutcome | None = None
+        approval_reason: str | None = None
+        if approval_decision is not None:
+            if not isinstance(approval_decision, ApprovalDecision):
+                raise TypeError("approval decision must be an ApprovalDecision")
+            approval_outcome = approval_decision.outcome
+            approval_reason = sanitize(approval_decision.reason)[0]
         try:
             capabilities = normalize_isolation_capabilities(backend_capabilities)
         except Exception:
@@ -1046,6 +1106,11 @@ class ActionRecord:
             action_display_truncated=display_truncated,
             diagnostics_truncated=diagnostics_truncated
             or len(rendered_diagnostics) > _MAX_RECORD_DIAGNOSTICS,
+            approval_outcome=approval_outcome,
+            approval_reason=approval_reason,
+            pre_hook_results=pre_hook_results,
+            post_hook_results=post_hook_results,
+            observation_failure=observation_failure,
         )
 
 
@@ -2802,19 +2867,23 @@ def run_post_hooks(
         if index == _MAX_HOOKS:
             results.append(_hook_config_failure("post_hook_limit_exceeded", mode=None))
             break
-        context.check_active()
-        if isinstance(hook, PreActionHookSpec):
-            result = _hook_config_failure("malformed_post_hook_configuration", mode=None)
-        else:
-            result = _execute_hook(
-                hook,
-                input_value,
-                mode=None,
-                context=context,
-                workspace=workspace,
-                secret_values=secrets,
-            )
-        context.check_active()
+        try:
+            context.check_active()
+            if isinstance(hook, PreActionHookSpec):
+                result = _hook_config_failure("malformed_post_hook_configuration", mode=None)
+            else:
+                result = _execute_hook(
+                    hook,
+                    input_value,
+                    mode=None,
+                    context=context,
+                    workspace=workspace,
+                    secret_values=secrets,
+                )
+            context.check_active()
+        except (RunCancelledError, RunDeadlineExceededError) as error:
+            object.__setattr__(error, "_dqagent_partial_post_hook_results", tuple(results))
+            raise
         results.append(result)
     return HookRunResult(HookStage.POST, tuple(results), True)
 
@@ -2886,13 +2955,23 @@ def _guard_max_governed_calls(action: PreparedAction, context: GuardContext) -> 
         return _failed(GuardName.MAX_GOVERNED_CALLS, "capacity_dependency_failure")
 
 
-def _guard_workspace_identity(action: PreparedAction, context: GuardContext) -> GuardResult:
+def _guard_workspace_identity(
+    action: PreparedAction,
+    context: GuardContext,
+    *,
+    expected_workspace: Workspace | None = None,
+) -> GuardResult:
     try:
         workspace_id = context.workspace.scope.workspace_id
         if not isinstance(workspace_id, str):
             return _failed(GuardName.WORKSPACE_IDENTITY, "malformed_workspace_identity")
         if action.workspace_id != workspace_id:
             return _failed(GuardName.WORKSPACE_IDENTITY, "workspace_identity_mismatch")
+        if expected_workspace is not None and (
+            not isinstance(expected_workspace, Workspace)
+            or not _workspace_scopes_match(expected_workspace, context.workspace)
+        ):
+            return _failed(GuardName.WORKSPACE_IDENTITY, "workspace_scope_binding_mismatch")
         return _passed(GuardName.WORKSPACE_IDENTITY, "workspace_identity_matches")
     except Exception:
         return _failed(GuardName.WORKSPACE_IDENTITY, "workspace_identity_dependency_failure")
@@ -3009,6 +3088,8 @@ _GUARD_FUNCTIONS: Final[tuple[Callable[[PreparedAction, GuardContext], GuardResu
 def evaluate_guards(
     action: PreparedAction,
     context: GuardContext,
+    *,
+    expected_workspace: Workspace | None = None,
 ) -> tuple[GuardResult, ...]:
     """Run hard guards in order and stop at the first fail-closed result."""
 
@@ -3019,7 +3100,14 @@ def evaluate_guards(
     results: list[GuardResult] = []
     for expected_name, guard in zip(HARD_GUARD_ORDER, _GUARD_FUNCTIONS, strict=True):
         try:
-            result = guard(action, context)
+            if expected_name is GuardName.WORKSPACE_IDENTITY:
+                result = _guard_workspace_identity(
+                    action,
+                    context,
+                    expected_workspace=expected_workspace,
+                )
+            else:
+                result = guard(action, context)
         except Exception:
             result = _failed(expected_name, "guard_dependency_failure")
         if not isinstance(result, GuardResult) or result.name is not expected_name:
@@ -3055,10 +3143,16 @@ def evaluate_action(
     action: PreparedAction,
     context: GuardContext,
     policy: ActionPolicy | None = None,
+    *,
+    expected_workspace: Workspace | None = None,
 ) -> GovernanceDecision:
     """Evaluate hard guards and policy without approval or effect execution."""
 
-    guard_results = evaluate_guards(action, context)
+    guard_results = evaluate_guards(
+        action,
+        context,
+        expected_workspace=expected_workspace,
+    )
     if not guard_results or not all(result.passed for result in guard_results):
         return GovernanceDecision(
             action=action,
@@ -3104,6 +3198,10 @@ def build_action_record(
     effect_state: EffectState = EffectState.NONE,
     diagnostics: Iterable[str] = (),
     max_text_characters: int = _MAX_RECORD_TEXT_CHARACTERS,
+    approval_decision: ApprovalDecision | None = None,
+    pre_hook_results: tuple[HookResult, ...] = (),
+    post_hook_results: tuple[HookResult, ...] = (),
+    observation_failure: bool = False,
 ) -> ActionRecord:
     """Functional wrapper for the record construction boundary."""
 
@@ -3117,4 +3215,8 @@ def build_action_record(
         effect_state=effect_state,
         diagnostics=diagnostics,
         max_text_characters=max_text_characters,
+        approval_decision=approval_decision,
+        pre_hook_results=pre_hook_results,
+        post_hook_results=post_hook_results,
+        observation_failure=observation_failure,
     )

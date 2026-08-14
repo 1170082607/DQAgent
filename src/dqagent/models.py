@@ -61,10 +61,25 @@ class ToolOutcome(StrEnum):
 
 class ToolErrorCode(StrEnum):
     INVALID_ARGUMENTS = "invalid_arguments"
+    ARGUMENT_TOO_LARGE = "argument_too_large"
+    ARGUMENTS_TOO_LARGE = "argument_too_large"
     UNKNOWN_TOOL = "unknown_tool"
     TIMEOUT = "timeout"
     EXECUTION_ERROR = "execution_error"
     REPEATED_CALL = "repeated_call"
+    GOVERNED_CALL_LIMIT = "governed_call_limit"
+    CONTAINMENT_DENIED = "containment_denied"
+    PROTECTED_RESOURCE_DENIED = "protected_resource_denied"
+    POLICY_DENIED = "policy_denied"
+    APPROVAL_REJECTED = "approval_rejected"
+    APPROVAL_UNAVAILABLE = "approval_unavailable"
+    APPROVAL_MISMATCH = "approval_mismatch"
+    PRECONDITION_CONFLICT = "precondition_conflict"
+    CAPABILITY_MISSING = "capability_missing"
+    RESOURCE_LIMIT = "resource_limit"
+    PROCESS_FAILURE = "process_failure"
+    OBSERVATION_FAILURE = "observation_failure"
+    GOVERNANCE_FAILURE = "governance_failure"
 
 
 @dataclass(frozen=True, slots=True)

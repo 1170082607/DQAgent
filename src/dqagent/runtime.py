@@ -26,7 +26,7 @@ from dqagent.models import (
     ToolOutcome,
     ToolResult,
 )
-from dqagent.tools import ToolRegistry
+from dqagent.tools import ToolExecutionContext, ToolRegistry
 
 __all__ = [
     "AgentRunResult",
@@ -131,15 +131,23 @@ class AgentRuntime:
         tools: ToolRegistry,
         *,
         max_iterations: int = 8,
+        max_governed_calls: int = 1,
         retry_policy: RetryPolicy | None = None,
         default_timeout_seconds: float | None = 120.0,
         event_sinks: Sequence[EventSink] = (),
     ) -> None:
         if max_iterations < 1:
             raise ValueError("max_iterations must be at least one")
+        if (
+            isinstance(max_governed_calls, bool)
+            or not isinstance(max_governed_calls, int)
+            or max_governed_calls < 1
+        ):
+            raise ValueError("max governed calls must be a positive integer")
         self._llm = llm
         self._tools = tools
         self._max_iterations = max_iterations
+        self._max_governed_calls = max_governed_calls
         self._retry_policy = retry_policy or RetryPolicy()
         self._run_coordinator = RunCoordinator(
             default_timeout_seconds=default_timeout_seconds,
@@ -151,10 +159,26 @@ class AgentRuntime:
         conversation: Sequence[ConversationItem],
         *,
         context: RunContext | None = None,
+        tool_context: ToolExecutionContext | None = None,
     ) -> AgentRunResult:
+        if tool_context is not None and not isinstance(tool_context, ToolExecutionContext):
+            raise TypeError("tool_context must be a ToolExecutionContext")
+        if (
+            tool_context is not None
+            and context is not None
+            and tool_context.run_context is not context
+        ):
+            raise ValueError("tool context and run context must be the same object")
+        coordinated_context = context or (
+            tool_context.run_context if tool_context is not None else None
+        )
         coordinated = self._run_coordinator.execute(
-            lambda scope: self.execute(conversation, scope=scope),
-            context=context,
+            lambda scope: self.execute(
+                conversation,
+                scope=scope,
+                tool_context=tool_context,
+            ),
+            context=coordinated_context,
             completion_attributes=lambda result: {"iterations": result.iterations},
         )
         return AgentRunResult.from_execution(coordinated.value, coordinated.record)
@@ -164,9 +188,24 @@ class AgentRuntime:
         conversation: Sequence[ConversationItem],
         *,
         scope: RunScope,
+        tool_context: ToolExecutionContext | None = None,
     ) -> AgentExecutionResult:
         """Execute the model/tool loop inside an externally coordinated run."""
         run_context = scope.context
+        if tool_context is not None and not isinstance(tool_context, ToolExecutionContext):
+            raise TypeError("tool_context must be a ToolExecutionContext")
+        if tool_context is not None and tool_context.run_context is not run_context:
+            raise ValueError("tool context and run scope must share the same RunContext")
+        owns_execution_context = tool_context is None
+        execution_context = (
+            tool_context
+            or ToolExecutionContext(
+                run_context,
+                max_governed_calls=self._max_governed_calls,
+            )
+        ).with_stage_emitter(
+            lambda event_type, attributes: scope.emit(RunEventType(event_type), attributes)
+        )
 
         try:
             pending = list(conversation)
@@ -219,7 +258,11 @@ class AgentRuntime:
                     else:
                         seen_call_ids.add(call.call_id)
                         seen_executions.add(execution_key)
-                        tool_execution = self._tools.execute_detailed(call, run_context)
+                        tool_execution = self._tools.execute_detailed(
+                            call,
+                            run_context,
+                            execution_context=execution_context,
+                        )
                         result = tool_execution.result
                         diagnostic = {
                             key: value
@@ -253,6 +296,9 @@ class AgentRuntime:
                 run_id=run_context.run_id,
             )
             raise error from exc
+        finally:
+            if owns_execution_context:
+                execution_context._close_owned_records()
 
     @property
     def run_coordinator(self) -> RunCoordinator:
