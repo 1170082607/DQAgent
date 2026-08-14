@@ -2,11 +2,13 @@
 
 ## Status
 
-This document describes the implemented Phase 8 T5-T13 architecture. Memory management is available
-as a model-free explicit application service, request-time policy-filtered recall, an optional durable
-session read stage, a bounded context projection, a pure source-to-transient-candidate extraction
-boundary, and independent memory/session CLI composition. The roadmap remains the source of truth for
-deferred capabilities; Phase 8 is complete within its documented v1 scope.
+This document describes the implemented Phase 8 T5-T13 architecture and the Phase 9 T1-T3
+foundations. Memory management is available as a model-free explicit application service,
+request-time policy-filtered recall, an optional durable session read stage, a bounded context
+projection, a pure source-to-transient-candidate extraction boundary, and independent memory/session
+CLI composition. Phase 9 currently has workspace authority/observation plus the prepared-action
+governance contracts; approval, hooks, executors, and subprocess backends remain later checkpoints.
+The roadmap remains the source of truth for deferred capabilities.
 
 ## System Context
 
@@ -634,6 +636,8 @@ ModelMemoryExtractor -> RunCoordinator + LLMClient + neutral models + jsonschema
 SqliteMemoryStore -> sqlite3 + local filesystem
 WorkspaceObserver -> Workspace + contained non-following filesystem traversal
 WorkspaceDiff -> immutable WorkspaceSnapshot + bounded unified projection
+Governed action -> PreparedAction -> hard guards -> tri-state ActionPolicy
+PreparedAction -> Workspace + subprocesses.IsolationCapability
 ```
 
 - Session state is owned above the runtime; one run cannot commit partial history.
@@ -665,6 +669,16 @@ WorkspaceDiff -> immutable WorkspaceSnapshot + bounded unified projection
   limit, cancellation, and filesystem omissions remain explicit blind spots; no secret content or
   secret fingerprint is retained. Target-scoped completeness may support a declared coding target,
   but global or forbidden predicates intersecting a blind spot remain indeterminate.
+- Phase 9 T3 keeps action authorization separate from effect execution. `PreparedAction` contains
+  normalized logical identity, effect preconditions, required technical capabilities, and effective
+  limits. Its versioned sorted-key JSON/SHA-256 digest excludes absolute roots, secret values, Python
+  representations, and display-only text. The fixed hard-guard order starts with the unified
+  `max_governed_calls` ceiling and fails closed before policy.
+- T3's default policy returns `allow` for read/search and `require_approval` for patch/command;
+  hard-guard failure is always `deny`. `ActionRecord` stores bounded sanitized governance evidence,
+  but T3 does not request approval, run hooks, call an executor, start a process, define subprocess
+  request/results, or reserve validator capacity. A canonical digest proves action identity only;
+  human approval remains a guarantee of the configured foreground approval provider in T4.
 
 ## Configuration
 
@@ -713,6 +727,10 @@ the runtime's model-attempt budget and defaults to three. All values are validat
   handling, same-size digest changes, target versus global/forbidden completeness, each snapshot
   and rendered-diff limit, cancellation, stable ordering, normalized line endings, binary/oversized
   metadata, and incomplete evidence propagation.
+- Governance tests assert golden canonicalization/digest sensitivity, immutable contracts, fixed
+  guard ordering, hard-guard non-overridability, tri-state policy outcomes, fail-closed dependency
+  behavior, unified call-capacity checks without reservation, executor non-invocation, and sanitized
+  bounded records.
 - CI runs Ruff, strict mypy, and pytest with at least 85% coverage.
 - CI also runs the credential-free deterministic behavioral, context, retrieval, and Phase 8 memory
   suites after implementation tests. The Phase 8 report uses the production memory/session path,
