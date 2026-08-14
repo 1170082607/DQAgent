@@ -632,6 +632,8 @@ MemoryExtractionPipeline -> MemoryExtractor + MemoryService
 DeterministicMemoryExtractor -> committed bounded source + explicit fixture
 ModelMemoryExtractor -> RunCoordinator + LLMClient + neutral models + jsonschema
 SqliteMemoryStore -> sqlite3 + local filesystem
+WorkspaceObserver -> Workspace + contained non-following filesystem traversal
+WorkspaceDiff -> immutable WorkspaceSnapshot + bounded unified projection
 ```
 
 - Session state is owned above the runtime; one run cannot commit partial history.
@@ -657,6 +659,12 @@ SqliteMemoryStore -> sqlite3 + local filesystem
   or consolidation decisions.
 - The current store boundary is local privacy and logical deletion. It is not encryption, forensic
   erasure, distributed tenancy, or durable audit delivery.
+- Workspace observation is task-scoped evidence owned by `WorkspaceObserver`. It captures immutable
+  baseline/final snapshots, compares regular-entry kind/size/full digest, and records deterministic
+  create/modify/delete/type-change records without Git. Protected, secret, ignored, volatile, link,
+  limit, cancellation, and filesystem omissions remain explicit blind spots; no secret content or
+  secret fingerprint is retained. Target-scoped completeness may support a declared coding target,
+  but global or forbidden predicates intersecting a blind spot remain indeterminate.
 
 ## Configuration
 
@@ -701,6 +709,10 @@ the runtime's model-attempt budget and defaults to three. All values are validat
   best-effort typed failures, cancellation/deadline/unknown failure handling, RAG ordering,
   lower-authority memory projection, disabled-path regression, CLI composition, and no memory write
   on session CAS failure.
+- Workspace tests assert bounded non-following observation, untracked/type/link/secret/ignored
+  handling, same-size digest changes, target versus global/forbidden completeness, each snapshot
+  and rendered-diff limit, cancellation, stable ordering, normalized line endings, binary/oversized
+  metadata, and incomplete evidence propagation.
 - CI runs Ruff, strict mypy, and pytest with at least 85% coverage.
 - CI also runs the credential-free deterministic behavioral, context, retrieval, and Phase 8 memory
   suites after implementation tests. The Phase 8 report uses the production memory/session path,

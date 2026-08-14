@@ -2,18 +2,25 @@ from __future__ import annotations
 
 import os
 import subprocess
+from dataclasses import FrozenInstanceError
 from pathlib import Path, PurePosixPath
+from threading import Event
 
 import pytest
 
+import dqagent.workspace as workspace_module
 from dqagent.workspace import (
     PathKind,
     Sanitizer,
     Workspace,
     WorkspaceAccessError,
+    WorkspaceBlindSpotReason,
+    WorkspaceChangeKind,
     WorkspaceDriftError,
+    WorkspaceEntryKind,
     WorkspaceError,
     WorkspaceLimits,
+    WorkspaceObserver,
     WorkspacePurpose,
     WorkspaceScope,
     sanitize_text,
@@ -23,6 +30,10 @@ from dqagent.workspace import (
 def make_workspace(tmp_path: Path, **kwargs: object) -> Workspace:
     scope = WorkspaceScope("fixture", tmp_path, **kwargs)
     return Workspace(scope)
+
+
+def make_observer(tmp_path: Path, **kwargs: object) -> WorkspaceObserver:
+    return WorkspaceObserver(make_workspace(tmp_path, **kwargs))
 
 
 def make_symlink(link: Path, target: Path, *, directory: bool = False) -> None:
@@ -454,3 +465,455 @@ def test_missing_target_root_drift_is_typed_and_does_not_expose_host_path(
 
     assert raised.value.reason_code == "drift"
     assert str(tmp_path) not in str(raised.value)
+
+
+def test_observer_records_untracked_modify_delete_and_type_change_in_stable_order(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "same.txt").write_text("one", encoding="utf-8")
+    (tmp_path / "deleted.txt").write_text("gone", encoding="utf-8")
+    (tmp_path / "type.txt").write_text("file", encoding="utf-8")
+    observer = make_observer(tmp_path)
+
+    baseline = observer.capture(target_paths=("same.txt", "type.txt"))
+    (tmp_path / "same.txt").write_text("two", encoding="utf-8")
+    (tmp_path / "deleted.txt").unlink()
+    (tmp_path / "type.txt").unlink()
+    (tmp_path / "type.txt").mkdir()
+    (tmp_path / "new.txt").write_text("new", encoding="utf-8")
+
+    final = observer.capture(target_paths=("same.txt", "type.txt"))
+    diff = observer.diff(baseline, final)
+
+    assert [item.logical_path.as_posix() for item in diff.changes] == [
+        "deleted.txt",
+        "new.txt",
+        "same.txt",
+        "type.txt",
+    ]
+    assert {item.kind for item in diff.changes} == {
+        WorkspaceChangeKind.CREATE,
+        WorkspaceChangeKind.MODIFY,
+        WorkspaceChangeKind.DELETE,
+        WorkspaceChangeKind.TYPE_CHANGE,
+    }
+    assert diff.untracked == diff.creates
+    assert diff.completeness.global_complete is True
+    assert diff.completeness.target_complete is True
+
+
+def test_observer_uses_full_digest_for_same_size_changes(tmp_path: Path) -> None:
+    target = tmp_path / "same.txt"
+    target.write_bytes(b"abc")
+    observer = make_observer(tmp_path)
+    baseline = observer.capture()
+
+    target.write_bytes(b"xyz")
+    final = observer.capture()
+    diff = observer.diff(baseline, final)
+
+    assert baseline.entries[0].size == final.entries[0].size == 3
+    assert baseline.entries[0].digest != final.entries[0].digest
+    assert [item.kind for item in diff.changes] == [WorkspaceChangeKind.MODIFY]
+    assert diff.changes[0].comparison_complete is True
+
+
+def test_observer_does_not_capture_secret_ignored_or_volatile_content(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / ".env.local").write_text("TOKEN=do-not-capture", encoding="utf-8")
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "config").write_text("private", encoding="utf-8")
+    (tmp_path / "ignored").mkdir()
+    (tmp_path / "ignored" / "cache.txt").write_text("cache", encoding="utf-8")
+    (tmp_path / "volatile").mkdir()
+    (tmp_path / "volatile" / "runtime.txt").write_text("runtime", encoding="utf-8")
+    (tmp_path / "target.txt").write_text("target", encoding="utf-8")
+    observer = make_observer(
+        tmp_path,
+        ignored_paths=(PurePosixPath("ignored"),),
+        volatile_paths=(PurePosixPath("volatile"),),
+    )
+
+    snapshot = observer.capture(target_paths=("target.txt",))
+    paths = {item.logical_path.as_posix() for item in snapshot.entries}
+    reasons = {(item.logical_path.as_posix(), item.reason_code) for item in snapshot.omissions}
+
+    assert ".env.local" not in paths
+    assert ".git" not in paths
+    assert "ignored" not in paths
+    assert "volatile" not in paths
+    assert (".env.local", WorkspaceBlindSpotReason.SECRET.value) in reasons
+    assert (".git", WorkspaceBlindSpotReason.PROTECTED.value) in reasons
+    assert ("ignored", WorkspaceBlindSpotReason.IGNORED.value) in reasons
+    assert ("volatile", WorkspaceBlindSpotReason.VOLATILE_EXCLUSION.value) in reasons
+    assert snapshot.completeness.global_complete is False
+    assert snapshot.completeness.target_complete is True
+    assert all("do-not-capture" not in repr(item) for item in snapshot.entries)
+
+
+def test_observer_records_links_without_following_them(tmp_path: Path) -> None:
+    target = tmp_path / "target.txt"
+    target.write_text("inside", encoding="utf-8")
+    link = tmp_path / "target-link"
+    make_symlink(link, target)
+    observer = make_observer(tmp_path)
+
+    snapshot = observer.capture()
+    entries = {item.logical_path.as_posix(): item for item in snapshot.entries}
+
+    assert entries["target-link"].kind is WorkspaceEntryKind.LINK
+    assert entries["target-link"].digest is None
+    assert entries["target-link"].text is None
+    assert any(
+        item.logical_path == PurePosixPath("target-link")
+        and item.reason_code == WorkspaceBlindSpotReason.LINK_NOT_FOLLOWED.value
+        for item in snapshot.omissions
+    )
+
+
+def test_directory_link_blind_spot_covers_nested_targets(tmp_path: Path) -> None:
+    target_directory = tmp_path / "target-directory"
+    target_directory.mkdir()
+    (target_directory / "child.txt").write_text("inside", encoding="utf-8")
+    link = tmp_path / "directory-link"
+    make_symlink(link, target_directory, directory=True)
+    observer = make_observer(tmp_path)
+
+    snapshot = observer.capture(target_paths=("directory-link/child.txt",))
+
+    assert not any(
+        item.logical_path.as_posix().startswith("directory-link/")
+        for item in snapshot.entries
+    )
+    assert snapshot.completeness.target_complete is False
+    assert any(
+        item.logical_path == PurePosixPath("directory-link") and item.subtree
+        for item in snapshot.omissions
+    )
+
+
+def test_observation_records_are_immutable(tmp_path: Path) -> None:
+    target = tmp_path / "target.txt"
+    target.write_text("before", encoding="utf-8")
+    observer = make_observer(tmp_path)
+    baseline = observer.capture()
+
+    target.write_text("after", encoding="utf-8")
+    final = observer.capture()
+    diff = observer.diff(baseline, final)
+
+    with pytest.raises(FrozenInstanceError):
+        baseline.entries = ()  # type: ignore[misc]
+    with pytest.raises(FrozenInstanceError):
+        baseline.entries[0].size = 99  # type: ignore[misc]
+    with pytest.raises(FrozenInstanceError):
+        baseline.completeness.global_complete = True  # type: ignore[misc]
+    with pytest.raises(FrozenInstanceError):
+        diff.changes = ()  # type: ignore[misc]
+
+
+def test_link_blind_spot_does_not_prove_its_target_content(tmp_path: Path) -> None:
+    secret = tmp_path / "secret.txt"
+    secret.write_text("link-target-secret", encoding="utf-8")
+    link = tmp_path / "secret-link"
+    make_symlink(link, secret)
+    observer = make_observer(tmp_path, secret_paths=(PurePosixPath("secret.txt"),))
+
+    baseline = observer.capture(target_paths=("secret-link",))
+    secret.write_text("changed-link-target-secret", encoding="utf-8")
+    final = observer.capture(target_paths=("secret-link",))
+    diff = observer.diff(baseline, final, target_paths=("secret-link",))
+
+    link_entry = next(
+        item for item in baseline.entries if item.logical_path == PurePosixPath("secret-link")
+    )
+    assert link_entry.digest is None
+    assert link_entry.text is None
+    assert "link-target-secret" not in repr(baseline)
+    assert not any(
+        item.logical_path == PurePosixPath("secret-link") for item in diff.changes
+    )
+    assert diff.completeness.target_complete is False
+    assert diff.completeness.global_complete is False
+
+
+def test_target_and_forbidden_completeness_are_scoped_independently(tmp_path: Path) -> None:
+    (tmp_path / "target.txt").write_text("before", encoding="utf-8")
+    (tmp_path / ".env").write_text("TOKEN=secret", encoding="utf-8")
+    observer = make_observer(tmp_path)
+    baseline = observer.capture(target_paths=("target.txt",))
+
+    (tmp_path / "target.txt").write_text("after!", encoding="utf-8")
+    final = observer.capture(target_paths=("target.txt",))
+    diff = observer.diff(
+        baseline,
+        final,
+        target_paths=("target.txt",),
+        forbidden_paths=(".env",),
+    )
+
+    assert diff.completeness.target_complete is True
+    assert diff.completeness.forbidden_complete is False
+    assert diff.completeness.global_complete is False
+    assert diff.completeness.observation_complete is False
+    assert any(item.reason_code == WorkspaceBlindSpotReason.SECRET.value for item in diff.omissions)
+
+
+@pytest.mark.parametrize(
+    ("limits_kwargs", "reason"),
+    [
+        (
+            {"max_snapshot_entries": 1},
+            WorkspaceBlindSpotReason.ENTRIES_LIMIT,
+        ),
+        (
+            {"max_snapshot_file_bytes": 2},
+            WorkspaceBlindSpotReason.PER_FILE_BYTES_LIMIT,
+        ),
+        (
+            {"max_snapshot_bytes": 2, "max_snapshot_file_bytes": 20},
+            WorkspaceBlindSpotReason.AGGREGATE_BYTES_LIMIT,
+        ),
+    ],
+)
+def test_observer_records_each_snapshot_resource_limit(
+    tmp_path: Path,
+    limits_kwargs: dict[str, object],
+    reason: WorkspaceBlindSpotReason,
+) -> None:
+    (tmp_path / "a.txt").write_text("1234", encoding="utf-8")
+    (tmp_path / "b.txt").write_text("5678", encoding="utf-8")
+    observer = make_observer(tmp_path, limits=WorkspaceLimits(**limits_kwargs))
+
+    snapshot = observer.capture()
+
+    assert any(item.reason_code == reason.value for item in snapshot.omissions)
+    assert snapshot.completeness.global_complete is False
+    if reason is WorkspaceBlindSpotReason.PER_FILE_BYTES_LIMIT:
+        entry = next(
+            item
+            for item in snapshot.entries
+            if item.logical_path == PurePosixPath("a.txt")
+        )
+        assert entry.digest is None
+        assert entry.text is None
+
+
+def test_observer_bounds_entry_limit_blind_spots_for_wide_nested_directories(
+    tmp_path: Path,
+) -> None:
+    for index in range(128):
+        (tmp_path / f"root-{index:03d}.txt").write_text("root", encoding="utf-8")
+
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    for index in range(128):
+        (nested / f"child-{index:03d}.txt").write_text("child", encoding="utf-8")
+
+    observer = make_observer(
+        tmp_path,
+        limits=WorkspaceLimits(max_snapshot_entries=1),
+    )
+
+    snapshot = observer.capture()
+
+    entry_limit_spots = [
+        item
+        for item in snapshot.omissions
+        if item.reason_code == WorkspaceBlindSpotReason.ENTRIES_LIMIT.value
+    ]
+    assert len(snapshot.entries) <= 1
+    assert [item.logical_path for item in snapshot.entries] == [PurePosixPath("nested")]
+    assert snapshot.completeness.observed_entries == len(snapshot.entries)
+    assert snapshot.completeness.global_complete is False
+    assert len(entry_limit_spots) <= 2
+    assert {item.logical_path for item in entry_limit_spots} == {
+        PurePosixPath("."),
+        PurePosixPath("nested"),
+    }
+    assert all(item.subtree for item in entry_limit_spots)
+
+
+def test_observer_bounds_explicit_exclusion_blind_spots_without_poisoning_target_scope(
+    tmp_path: Path,
+) -> None:
+    for index in range(128):
+        (tmp_path / f"secret-{index:03d}.pem").write_text(
+            "do-not-capture", encoding="utf-8"
+        )
+    (tmp_path / "target.txt").write_text("target", encoding="utf-8")
+    observer = make_observer(
+        tmp_path,
+        limits=WorkspaceLimits(max_snapshot_entries=1),
+    )
+
+    snapshot = observer.capture(target_paths=("target.txt",))
+
+    secret_spots = [
+        item
+        for item in snapshot.omissions
+        if item.reason_code == WorkspaceBlindSpotReason.SECRET.value
+    ]
+    assert [item.logical_path for item in snapshot.entries] == [PurePosixPath("target.txt")]
+    assert len(secret_spots) <= 2
+    assert any(item.aggregate for item in secret_spots)
+    assert snapshot.completeness.target_complete is True
+    assert snapshot.completeness.global_complete is False
+    assert "do-not-capture" not in repr(snapshot)
+
+
+def test_observer_marks_an_explicitly_excluded_target_incomplete_after_aggregation(
+    tmp_path: Path,
+) -> None:
+    for index in range(16):
+        (tmp_path / f"secret-{index:03d}.pem").write_text(
+            "do-not-capture", encoding="utf-8"
+        )
+    observer = make_observer(
+        tmp_path,
+        limits=WorkspaceLimits(max_snapshot_entries=1),
+    )
+
+    snapshot = observer.capture(target_paths=("secret-015.pem",))
+
+    assert snapshot.completeness.target_complete is False
+    assert snapshot.completeness.global_complete is False
+
+
+def test_observer_checks_cancellation_while_ordering_candidates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for index in range(16):
+        (tmp_path / f"file-{index:03d}.txt").write_text("content", encoding="utf-8")
+    cancelled = Event()
+    original_heappop = workspace_module.heapq.heappop
+
+    def cancel_after_pop(heap: object) -> object:
+        item = original_heappop(heap)  # type: ignore[arg-type]
+        cancelled.set()
+        return item
+
+    monkeypatch.setattr(workspace_module.heapq, "heappop", cancel_after_pop)
+
+    snapshot = make_observer(tmp_path).capture(cancel=cancelled)
+
+    assert any(
+        item.reason_code == WorkspaceBlindSpotReason.CANCELLED.value
+        for item in snapshot.omissions
+    )
+    assert snapshot.completeness.global_complete is False
+
+
+def test_observer_records_elapsed_limit_and_cancellation() -> None:
+    class AdvancingClock:
+        def __init__(self) -> None:
+            self.value = 0.0
+
+        def __call__(self) -> float:
+            current = self.value
+            self.value += 1.0
+            return current
+
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as raw_root:
+        root = Path(raw_root)
+        (root / "file.txt").write_text("content", encoding="utf-8")
+        elapsed_observer = WorkspaceObserver(
+            make_workspace(
+                root,
+                limits=WorkspaceLimits(max_snapshot_elapsed_seconds=0.5),
+            ),
+            monotonic=AdvancingClock(),
+        )
+        elapsed = elapsed_observer.capture()
+        assert any(
+            item.reason_code == WorkspaceBlindSpotReason.ELAPSED_LIMIT.value
+            for item in elapsed.omissions
+        )
+        assert elapsed.completeness.global_complete is False
+
+        cancelled = Event()
+        cancelled.set()
+        cancelled_snapshot = make_observer(root).capture(cancel=cancelled)
+        assert any(
+            item.reason_code == WorkspaceBlindSpotReason.CANCELLED.value
+            for item in cancelled_snapshot.omissions
+        )
+        assert cancelled_snapshot.completeness.global_complete is False
+
+
+def test_observer_uses_safe_binary_and_oversized_metadata(tmp_path: Path) -> None:
+    (tmp_path / "binary.bin").write_bytes(b"\x00\x01\x02")
+    (tmp_path / "large.txt").write_text("12345", encoding="utf-8")
+    observer = make_observer(
+        tmp_path,
+        limits=WorkspaceLimits(max_snapshot_file_bytes=4),
+    )
+
+    snapshot = observer.capture()
+    entries = {item.logical_path.as_posix(): item for item in snapshot.entries}
+
+    assert entries["binary.bin"].binary is True
+    assert entries["binary.bin"].text is None
+    assert entries["binary.bin"].digest is not None
+    assert entries["large.txt"].text is None
+    assert entries["large.txt"].digest is None
+    assert "12345" not in repr(entries["large.txt"])
+
+
+def test_observer_normalizes_line_endings_only_in_rendered_projection(tmp_path: Path) -> None:
+    target = tmp_path / "lines.txt"
+    target.write_bytes(b"one\r\ntwo\r\n")
+    observer = make_observer(tmp_path)
+    baseline = observer.capture()
+
+    target.write_bytes(b"one\ntwo\n")
+    final = observer.capture()
+    diff = observer.diff(baseline, final)
+
+    assert diff.changes[0].kind is WorkspaceChangeKind.MODIFY
+    assert "metadata differs; text projection is equal" in diff.rendered_diff
+    assert "\r" not in diff.rendered_diff
+
+
+def test_observer_propagates_incomplete_same_size_content_comparison(tmp_path: Path) -> None:
+    target = tmp_path / "large.txt"
+    target.write_bytes(b"aaaa")
+    observer = make_observer(
+        tmp_path,
+        limits=WorkspaceLimits(max_snapshot_file_bytes=3),
+    )
+    baseline = observer.capture(target_paths=("large.txt",))
+
+    target.write_bytes(b"bbbb")
+    final = observer.capture(target_paths=("large.txt",))
+    diff = observer.diff(baseline, final, target_paths=("large.txt",))
+
+    assert diff.changes == ()
+    assert diff.completeness.target_complete is False
+    assert diff.completeness.global_complete is False
+
+
+def test_observer_bounds_rendered_diff_and_keeps_structured_change(tmp_path: Path) -> None:
+    target = tmp_path / "file.txt"
+    target.write_text("before", encoding="utf-8")
+    observer = make_observer(
+        tmp_path,
+        limits=WorkspaceLimits(max_rendered_diff_characters=8),
+    )
+    baseline = observer.capture()
+
+    target.write_text("after content", encoding="utf-8")
+    final = observer.capture()
+    diff = observer.diff(baseline, final)
+
+    assert len(diff.rendered_diff) <= 8
+    assert diff.completeness.rendered_diff_complete is False
+    assert (
+        diff.completeness.rendered_diff_omission_reason
+        == WorkspaceBlindSpotReason.RENDERED_DIFF_LIMIT
+    )
+    assert len(diff.changes) == 1
