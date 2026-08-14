@@ -83,6 +83,15 @@ class ActionExecutor(Protocol):
     ) -> ActionExecutionResult | str: ...
 
 
+class ActionOutputSanitizer(Protocol):
+    def __call__(
+        self,
+        guard_context: GuardContext,
+        output: str,
+        max_characters: int,
+    ) -> tuple[str, bool, bool]: ...
+
+
 class GuardContextFactory(Protocol):
     def __call__(
         self,
@@ -523,6 +532,7 @@ class ActionTool:
     post_hooks: tuple[PostActionHook, ...] = ()
     secret_values: tuple[str, ...] = ()
     max_argument_bytes: int = DEFAULT_GOVERNED_ARGUMENT_BYTES
+    output_sanitizer: ActionOutputSanitizer | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.definition, ToolDefinition):
@@ -535,6 +545,8 @@ class ActionTool:
             raise TypeError("action tool guard_context must be a GuardContext")
         if self.guard_context_factory is not None and not callable(self.guard_context_factory):
             raise TypeError("action tool guard_context_factory must be callable")
+        if self.output_sanitizer is not None and not callable(self.output_sanitizer):
+            raise TypeError("action output sanitizer must be callable")
         if (
             isinstance(self.max_argument_bytes, bool)
             or not isinstance(self.max_argument_bytes, int)
@@ -1377,6 +1389,8 @@ class ActionTool:
         max_characters: int,
     ) -> tuple[str, bool, bool]:
         try:
+            if self.output_sanitizer is not None:
+                return self.output_sanitizer(guard_context, output, max_characters)
             rendered = guard_context.workspace.sanitizer(
                 secrets=self.secret_values,
             ).sanitize_with_evidence(output, max_characters=max_characters)

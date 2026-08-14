@@ -15,7 +15,7 @@ import os
 import re
 import stat
 import time
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -44,6 +44,7 @@ __all__ = [
     "WorkspaceEntryKind",
     "WorkspaceObserver",
     "WorkspaceSnapshot",
+    "WorkspaceWalkEntry",
     "PathKind",
     "SanitizedText",
     "Sanitizer",
@@ -86,6 +87,7 @@ _DEFAULT_MAX_SNAPSHOT_BYTES: Final[int] = 16_000_000
 _DEFAULT_MAX_SNAPSHOT_FILE_BYTES: Final[int] = 1_000_000
 _DEFAULT_MAX_SNAPSHOT_ELAPSED_SECONDS: Final[float] = 10.0
 _DEFAULT_MAX_RENDERED_DIFF_CHARACTERS: Final[int] = 200_000
+_WORKSPACE_ROOT_PATH: Final[PurePosixPath] = PurePosixPath(".")
 
 
 class WorkspacePurpose(StrEnum):
@@ -868,6 +870,41 @@ class ResolvedWorkspacePath:
 
 
 @dataclass(frozen=True, slots=True)
+class WorkspaceWalkEntry:
+    """One safe item yielded by the shared non-following workspace walker.
+
+    ``path`` is an internal trusted projection for regular files only. Omitted
+    entries intentionally retain only a logical path and a reason, so callers
+    can count omissions without resolving or exposing denied targets.
+    """
+
+    logical_path: PurePosixPath
+    path: Path | None = None
+    kind: PathKind = PathKind.OTHER
+    omission_reason: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.logical_path, PurePosixPath):
+            raise TypeError("walk logical path must be a PurePosixPath")
+        if self.path is not None and not isinstance(self.path, Path):
+            raise TypeError("walk path must be a Path or None")
+        if not isinstance(self.kind, PathKind):
+            raise TypeError("walk kind must be a PathKind")
+        if self.omission_reason is not None and (
+            not isinstance(self.omission_reason, str) or not self.omission_reason
+        ):
+            raise ValueError("walk omission reason must be non-empty text")
+        if self.kind is PathKind.REGULAR_FILE and self.path is None:
+            raise ValueError("regular walk entries require a trusted path")
+        if self.omission_reason is None and self.kind is not PathKind.REGULAR_FILE:
+            raise ValueError("non-file walk entries require an omission reason")
+
+    @property
+    def omitted(self) -> bool:
+        return self.omission_reason is not None
+
+
+@dataclass(frozen=True, slots=True)
 class SanitizedText:
     """Bounded text plus evidence about redaction and truncation."""
 
@@ -1044,7 +1081,7 @@ class Workspace:
     ) -> ResolvedWorkspacePath:
         """Resolve the trusted root for snapshot and observation adapters."""
 
-        if purpose is not WorkspacePurpose.SNAPSHOT:
+        if purpose not in {WorkspacePurpose.SNAPSHOT, WorkspacePurpose.SEARCH}:
             raise WorkspacePathError(
                 reason_code=WorkspaceReason.TARGET_KIND,
                 purpose=purpose,
@@ -1144,6 +1181,225 @@ class Workspace:
                 workspace_id=self._scope.workspace_id,
             )
         return current
+
+    def normalize(
+        self,
+        logical_path: str | PurePosixPath,
+        *,
+        purpose: WorkspacePurpose | str,
+    ) -> PurePosixPath:
+        """Validate one logical path without resolving or reading it."""
+
+        return self._parse_path(logical_path, _coerce_purpose(purpose))
+
+    def walk(
+        self,
+        logical_path: str | PurePosixPath = _WORKSPACE_ROOT_PATH,
+        *,
+        max_files: int,
+        cancel: Callable[[], bool] | object | None = None,
+    ) -> Iterator[WorkspaceWalkEntry]:
+        """Yield regular files in deterministic order without following links.
+
+        Directory candidates are retained only up to ``max_files`` per active
+        directory. A discarded candidate produces one content-free limit
+        omission after the selected prefix has been walked. The method is a
+        shared authority boundary for read-only tools; it never returns file
+        content and never follows a denied or link entry.
+        """
+
+        _validate_positive_int("maximum walked files", max_files)
+        if (isinstance(logical_path, PurePosixPath) and logical_path == _WORKSPACE_ROOT_PATH) or (
+            isinstance(logical_path, str) and logical_path == "."
+        ):
+            normalized = _WORKSPACE_ROOT_PATH
+        else:
+            normalized = self._parse_path(logical_path, WorkspacePurpose.SEARCH)
+
+        try:
+            if normalized == PurePosixPath("."):
+                resolved = self.resolve_root(purpose=WorkspacePurpose.SEARCH)
+            else:
+                resolved = self.resolve(normalized, purpose=WorkspacePurpose.SEARCH)
+        except WorkspaceError as error:
+            yield WorkspaceWalkEntry(
+                normalized,
+                kind=(
+                    PathKind.MISSING
+                    if error.reason_code
+                    in {WorkspaceReason.TARGET_MISSING, WorkspaceReason.PARENT_MISSING}
+                    else PathKind.OTHER
+                ),
+                omission_reason=str(error.reason_code),
+            )
+            return
+
+        if resolved.followed_link:
+            yield WorkspaceWalkEntry(
+                normalized,
+                kind=PathKind.OTHER,
+                omission_reason=WorkspaceBlindSpotReason.LINK_NOT_FOLLOWED.value,
+            )
+            return
+        if resolved.is_file:
+            yield WorkspaceWalkEntry(normalized, resolved.path, PathKind.REGULAR_FILE)
+            return
+        if not resolved.is_directory:
+            yield WorkspaceWalkEntry(
+                normalized,
+                kind=resolved.kind,
+                omission_reason=WorkspaceBlindSpotReason.UNSUPPORTED_KIND.value,
+            )
+            return
+
+        stack: list[_WorkspaceWalkFrame] = []
+        try:
+            candidates, omitted = _bounded_walk_candidates(
+                resolved.path,
+                normalized,
+                max_files,
+                cancel=cancel,
+            )
+        except OSError:
+            yield WorkspaceWalkEntry(
+                normalized,
+                kind=PathKind.DIRECTORY,
+                omission_reason=WorkspaceBlindSpotReason.FILESYSTEM_ERROR.value,
+            )
+            return
+        stack.append(_WorkspaceWalkFrame(resolved.path, normalized, candidates, omitted))
+        visited_files = 0
+
+        while stack:
+            _walk_check_cancel(cancel)
+            frame = stack[-1]
+            if frame.index >= len(frame.candidates):
+                stack.pop()
+                if frame.omitted:
+                    yield WorkspaceWalkEntry(
+                        frame.logical_path,
+                        kind=PathKind.DIRECTORY,
+                        omission_reason="visited_files_limit",
+                    )
+                continue
+            if visited_files >= max_files:
+                yield WorkspaceWalkEntry(
+                    frame.logical_path,
+                    kind=PathKind.DIRECTORY,
+                    omission_reason="visited_files_limit",
+                )
+                return
+
+            candidate = frame.candidates[frame.index]
+            frame.index += 1
+            child = candidate.child
+            logical = _join_logical(frame.logical_path, child.name)
+            if self.is_protected(logical):
+                yield WorkspaceWalkEntry(
+                    logical,
+                    kind=PathKind.OTHER,
+                    omission_reason=WorkspaceBlindSpotReason.PROTECTED.value,
+                )
+                continue
+            if self.is_secret(logical):
+                yield WorkspaceWalkEntry(
+                    logical,
+                    kind=PathKind.OTHER,
+                    omission_reason=WorkspaceBlindSpotReason.SECRET.value,
+                )
+                continue
+
+            try:
+                file_info = child.stat(follow_symlinks=False)
+            except (OSError, ValueError):
+                yield WorkspaceWalkEntry(
+                    logical,
+                    kind=PathKind.OTHER,
+                    omission_reason=WorkspaceBlindSpotReason.FILESYSTEM_ERROR.value,
+                )
+                continue
+
+            kind = _entry_kind(file_info)
+            if kind is WorkspaceEntryKind.LINK:
+                yield WorkspaceWalkEntry(
+                    logical,
+                    kind=PathKind.OTHER,
+                    omission_reason=WorkspaceBlindSpotReason.LINK_NOT_FOLLOWED.value,
+                )
+                continue
+            if kind is WorkspaceEntryKind.DIRECTORY:
+                try:
+                    child_candidates, child_omitted = _bounded_walk_candidates(
+                        Path(child.path),
+                        logical,
+                        max_files,
+                        cancel=cancel,
+                    )
+                except OSError:
+                    yield WorkspaceWalkEntry(
+                        logical,
+                        kind=PathKind.DIRECTORY,
+                        omission_reason=WorkspaceBlindSpotReason.FILESYSTEM_ERROR.value,
+                    )
+                    continue
+                stack.append(
+                    _WorkspaceWalkFrame(
+                        Path(child.path),
+                        logical,
+                        child_candidates,
+                        child_omitted,
+                    )
+                )
+                continue
+            if kind is not WorkspaceEntryKind.REGULAR:
+                yield WorkspaceWalkEntry(
+                    logical,
+                    kind=PathKind.OTHER,
+                    omission_reason=WorkspaceBlindSpotReason.UNSUPPORTED_KIND.value,
+                )
+                continue
+            if visited_files >= max_files:
+                yield WorkspaceWalkEntry(
+                    frame.logical_path,
+                    kind=PathKind.DIRECTORY,
+                    omission_reason="visited_files_limit",
+                )
+                return
+            visited_files += 1
+            try:
+                current = self.resolve(logical, purpose=WorkspacePurpose.SEARCH)
+                if current.followed_link:
+                    raise WorkspacePathError(
+                        reason_code=WorkspaceReason.LINK_ESCAPE,
+                        purpose=WorkspacePurpose.SEARCH,
+                        workspace_id=self.scope.workspace_id,
+                    )
+                if not current.is_file:
+                    raise WorkspacePathError(
+                        reason_code=WorkspaceReason.TARGET_KIND,
+                        purpose=WorkspacePurpose.SEARCH,
+                        workspace_id=self.scope.workspace_id,
+                    )
+            except WorkspaceError as error:
+                reason = (
+                    WorkspaceBlindSpotReason.LINK_NOT_FOLLOWED.value
+                    if error.reason_code == WorkspaceReason.LINK_ESCAPE
+                    else str(error.reason_code)
+                )
+                yield WorkspaceWalkEntry(logical, kind=PathKind.OTHER, omission_reason=reason)
+                continue
+            yield WorkspaceWalkEntry(logical, current.path, PathKind.REGULAR_FILE)
+
+    def walk_contained(
+        self,
+        logical_path: str | PurePosixPath = _WORKSPACE_ROOT_PATH,
+        *,
+        max_files: int,
+        cancel: Callable[[], bool] | object | None = None,
+    ) -> Iterator[WorkspaceWalkEntry]:
+        """Alias for the shared non-following read/search walker."""
+
+        return self.walk(logical_path, max_files=max_files, cancel=cancel)
 
     def is_protected(self, logical_path: PurePosixPath) -> bool:
         return _matches_any(logical_path, self._scope.protected_paths)
@@ -1500,6 +1756,64 @@ class _DirectoryCandidate:
         # ``heapq`` keeps the largest logical key at the root so the bounded
         # selection can replace it when a smaller child is discovered.
         return self.sort_key > other.sort_key
+
+
+@dataclass(slots=True)
+class _WorkspaceWalkFrame:
+    directory: Path
+    logical_path: PurePosixPath
+    candidates: tuple[_DirectoryCandidate, ...]
+    omitted: bool
+    index: int = 0
+
+
+def _bounded_walk_candidates(
+    directory: Path,
+    logical_directory: PurePosixPath,
+    capacity: int,
+    *,
+    cancel: Callable[[], bool] | object | None = None,
+) -> tuple[tuple[_DirectoryCandidate, ...], bool]:
+    """Select a deterministic prefix without retaining an unbounded directory."""
+
+    candidates: list[_DirectoryCandidate] = []
+    omitted = False
+    with os.scandir(directory) as iterator:
+        for child in iterator:
+            _walk_check_cancel(cancel)
+            candidate = _DirectoryCandidate(
+                sort_key=(_logical_key(_join_logical(logical_directory, child.name)), child.name),
+                child=child,
+            )
+            if len(candidates) < capacity:
+                heapq.heappush(candidates, candidate)
+                continue
+            omitted = True
+            if candidate.sort_key < candidates[0].sort_key:
+                heapq.heapreplace(candidates, candidate)
+    return tuple(sorted(candidates, key=lambda item: item.sort_key)), omitted
+
+
+def _walk_check_cancel(cancel: Callable[[], bool] | object | None) -> None:
+    if cancel is None:
+        return
+    check_active = getattr(cancel, "check_active", None)
+    if callable(check_active):
+        check_active()
+        return
+    if callable(cancel):
+        if bool(cancel()):
+            raise RunCancelledError("workspace walk cancelled")
+        return
+    is_set = getattr(cancel, "is_set", None)
+    if callable(is_set) and bool(is_set()):
+        raise RunCancelledError("workspace walk cancelled")
+    is_cancelled = getattr(cancel, "is_cancelled", None)
+    if isinstance(is_cancelled, bool) and is_cancelled:
+        raise RunCancelledError("workspace walk cancelled")
+    if callable(is_cancelled) and bool(is_cancelled()):
+        raise RunCancelledError("workspace walk cancelled")
+    raise TypeError("cancel must be a callback or cancellation-like object")
 
 
 class WorkspaceObserver:

@@ -2982,9 +2982,18 @@ def _guard_current_containment(action: PreparedAction, context: GuardContext) ->
         for logical_path, purpose in _action_paths(action):
             try:
                 if logical_path == PurePosixPath("."):
-                    if purpose is not WorkspacePurpose.COMMAND_CWD:
+                    if purpose not in {
+                        WorkspacePurpose.COMMAND_CWD,
+                        WorkspacePurpose.SEARCH,
+                    }:
                         return _failed(GuardName.CURRENT_CONTAINMENT, "root_target_not_allowed")
-                    resolved = context.workspace.resolve_root()
+                    resolved = context.workspace.resolve_root(
+                        purpose=(
+                            WorkspacePurpose.SEARCH
+                            if purpose is WorkspacePurpose.SEARCH
+                            else WorkspacePurpose.SNAPSHOT
+                        )
+                    )
                 else:
                     resolved = context.workspace.resolve(
                         logical_path,
@@ -2996,11 +3005,29 @@ def _guard_current_containment(action: PreparedAction, context: GuardContext) ->
                     WorkspaceReason.SECRET.value,
                 }:
                     continue
+                if (
+                    str(error.reason_code)
+                    in {
+                        WorkspaceReason.TARGET_MISSING.value,
+                        WorkspaceReason.PARENT_MISSING.value,
+                    }
+                    and action.action_kind in {ActionKind.READ, ActionKind.SEARCH}
+                ):
+                    continue
                 return _failed(
                     GuardName.CURRENT_CONTAINMENT,
                     "current_containment_denied",
                 )
-            except WorkspaceError:
+            except WorkspaceError as error:
+                if (
+                    str(error.reason_code)
+                    in {
+                        WorkspaceReason.TARGET_MISSING.value,
+                        WorkspaceReason.PARENT_MISSING.value,
+                    }
+                    and action.action_kind in {ActionKind.READ, ActionKind.SEARCH}
+                ):
+                    continue
                 return _failed(GuardName.CURRENT_CONTAINMENT, "current_containment_denied")
             if not isinstance(resolved, ResolvedWorkspacePath):
                 return _failed(GuardName.CURRENT_CONTAINMENT, "malformed_containment_response")
