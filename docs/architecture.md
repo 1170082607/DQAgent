@@ -2,12 +2,13 @@
 
 ## Status
 
-This document describes the implemented Phase 8 T5-T13 architecture and the Phase 9 T1-T3
+This document describes the implemented Phase 8 T5-T13 architecture and the Phase 9 T1-T4
 foundations. Memory management is available as a model-free explicit application service,
 request-time policy-filtered recall, an optional durable session read stage, a bounded context
 projection, a pure source-to-transient-candidate extraction boundary, and independent memory/session
-CLI composition. Phase 9 currently has workspace authority/observation plus the prepared-action
-governance contracts; approval, hooks, executors, and subprocess backends remain later checkpoints.
+CLI composition. Phase 9 currently has workspace authority/observation, prepared-action governance,
+exact foreground approval, and synchronous hook contracts; governed executors and subprocess backends
+remain later checkpoints.
 The roadmap remains the source of truth for deferred capabilities.
 
 ## System Context
@@ -636,8 +637,9 @@ ModelMemoryExtractor -> RunCoordinator + LLMClient + neutral models + jsonschema
 SqliteMemoryStore -> sqlite3 + local filesystem
 WorkspaceObserver -> Workspace + contained non-following filesystem traversal
 WorkspaceDiff -> immutable WorkspaceSnapshot + bounded unified projection
-Governed action -> PreparedAction -> hard guards -> tri-state ActionPolicy
-PreparedAction -> Workspace + subprocesses.IsolationCapability
+  Governed action -> PreparedAction -> hard guards -> tri-state ActionPolicy
+                 -> exact ApprovalRequest/ApprovalDecision -> ordered hooks
+  PreparedAction -> Workspace + subprocesses.IsolationCapability
 ```
 
 - Session state is owned above the runtime; one run cannot commit partial history.
@@ -677,8 +679,17 @@ PreparedAction -> Workspace + subprocesses.IsolationCapability
 - T3's default policy returns `allow` for read/search and `require_approval` for patch/command;
   hard-guard failure is always `deny`. `ActionRecord` stores bounded sanitized governance evidence,
   but T3 does not request approval, run hooks, call an executor, start a process, define subprocess
-  request/results, or reserve validator capacity. A canonical digest proves action identity only;
-  human approval remains a guarantee of the configured foreground approval provider in T4.
+  request/results, or reserve validator capacity. A canonical digest proves action identity only.
+- Phase 9 T4 projects approval requests and decisions through bounded immutable sanitized records.
+  Approval is one foreground response bound to run/workspace/action/preconditions/capabilities;
+  rejection, unavailable input, malformed data, identity mismatch, and drift fail closed, while
+  cancellation remains a `RunContext` control error. The non-interactive provider never reads stdin
+  and scripted approval responses are consumed once.
+- T4 hook inputs contain only immutable sanitized action projections. Required pre-hook failure blocks
+  before an effect, optional pre-hook failure is recorded while execution may continue, and ordered
+  post-hook failure is visible without changing effect evidence. Hooks are synchronous trusted
+  extensions; they are not `EventSink` instances and receive no workspace, subprocess, or executor
+  capability.
 
 ## Configuration
 
@@ -730,7 +741,8 @@ the runtime's model-attempt budget and defaults to three. All values are validat
 - Governance tests assert golden canonicalization/digest sensitivity, immutable contracts, fixed
   guard ordering, hard-guard non-overridability, tri-state policy outcomes, fail-closed dependency
   behavior, unified call-capacity checks without reservation, executor non-invocation, and sanitized
-  bounded records.
+  bounded records. T4 tests additionally cover every approval classification, active-run and drift
+  revalidation, deadline capability honesty, sanitization, ordered hook modes, and post-effect failure.
 - CI runs Ruff, strict mypy, and pytest with at least 85% coverage.
 - CI also runs the credential-free deterministic behavioral, context, retrieval, and Phase 8 memory
   suites after implementation tests. The Phase 8 report uses the production memory/session path,
