@@ -83,6 +83,14 @@ class ActionExecutor(Protocol):
     ) -> ActionExecutionResult | str: ...
 
 
+class ActionCleanup(Protocol):
+    def __call__(
+        self,
+        action: PreparedAction | None,
+        context: ToolExecutionContext,
+    ) -> None: ...
+
+
 class ActionOutputSanitizer(Protocol):
     def __call__(
         self,
@@ -90,6 +98,41 @@ class ActionOutputSanitizer(Protocol):
         output: str,
         max_characters: int,
     ) -> tuple[str, bool, bool]: ...
+
+
+class ActionPreparationError(Exception):
+    """A bounded, model-visible failure while constructing an action."""
+
+    def __init__(self, code: ToolErrorCode, message: str) -> None:
+        if not isinstance(code, ToolErrorCode):
+            raise TypeError("action preparation error code must be a ToolErrorCode")
+        super().__init__(message)
+        self.code = code
+
+
+class ActionExecutionError(Exception):
+    """A typed executor failure that preserves its observed effect state."""
+
+    def __init__(
+        self,
+        code: ToolErrorCode,
+        message: str,
+        *,
+        effect_state: EffectState,
+        diagnostics: Sequence[str] = (),
+    ) -> None:
+        if not isinstance(code, ToolErrorCode):
+            raise TypeError("action execution error code must be a ToolErrorCode")
+        if not isinstance(effect_state, EffectState):
+            raise TypeError("action execution error effect state must be an EffectState")
+        if not isinstance(diagnostics, tuple):
+            diagnostics = tuple(diagnostics)
+        if len(diagnostics) > 8 or any(not isinstance(item, str) for item in diagnostics):
+            raise ValueError("action execution error diagnostics are malformed or unbounded")
+        super().__init__(message)
+        self.code = code
+        self.effect_state = effect_state
+        self.diagnostics = diagnostics
 
 
 class GuardContextFactory(Protocol):
@@ -533,6 +576,7 @@ class ActionTool:
     secret_values: tuple[str, ...] = ()
     max_argument_bytes: int = DEFAULT_GOVERNED_ARGUMENT_BYTES
     output_sanitizer: ActionOutputSanitizer | None = None
+    action_cleanup: ActionCleanup | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.definition, ToolDefinition):
@@ -547,6 +591,8 @@ class ActionTool:
             raise TypeError("action tool guard_context_factory must be callable")
         if self.output_sanitizer is not None and not callable(self.output_sanitizer):
             raise TypeError("action output sanitizer must be callable")
+        if self.action_cleanup is not None and not callable(self.action_cleanup):
+            raise TypeError("action cleanup must be callable")
         if (
             isinstance(self.max_argument_bytes, bool)
             or not isinstance(self.max_argument_bytes, int)
@@ -581,6 +627,7 @@ class ActionTool:
         executor_attempts = 0
         effect_state = EffectState.NONE
         diagnostics: list[str] = []
+        execution_error_code: ToolErrorCode | None = None
         revalidated_guard_count = 0
         expected_workspace = (
             self.guard_context.workspace
@@ -642,6 +689,15 @@ class ActionTool:
                     raise TypeError("action preparer returned an invalid PreparedAction")
             except (RunCancelledError, RunDeadlineExceededError):
                 raise
+            except ActionPreparationError as error:
+                self._emit(context, RunEventType.ACTION_OBSERVED, reason=error.code.value)
+                return self._error_execution(
+                    call,
+                    error.code,
+                    "governed action preparation failed",
+                    error_type=type(error).__name__,
+                    error_message=str(error),
+                )
             except Exception as error:
                 self._emit(context, RunEventType.ACTION_OBSERVED, reason="preparation_failed")
                 return self._error_execution(
@@ -1063,6 +1119,12 @@ class ActionTool:
             except (RunCancelledError, RunDeadlineExceededError):
                 effect_state = EffectState.UNKNOWN
                 raise
+            except ActionExecutionError as error:
+                executor_error = error
+                effect_state = error.effect_state
+                execution_error_code = error.code
+                diagnostics.extend(error.diagnostics)
+                output_observation_failure = False
             except Exception as error:
                 executor_error = error
                 effect_state = EffectState.UNKNOWN
@@ -1131,7 +1193,7 @@ class ActionTool:
                 observation_failure=observation_failure,
             )
             if executor_error is not None:
-                code = (
+                code = execution_error_code or (
                     ToolErrorCode.PROCESS_FAILURE
                     if action.effect_kind.value == "process_execution"
                     else ToolErrorCode.EXECUTION_ERROR
@@ -1187,6 +1249,9 @@ class ActionTool:
                         extra={"run_id": run_context.run_id},
                     )
             raise
+        finally:
+            if self.action_cleanup is not None:
+                self.action_cleanup(action, context)
 
     def _guard_context(
         self,

@@ -3031,6 +3031,8 @@ def _guard_current_containment(action: PreparedAction, context: GuardContext) ->
                 return _failed(GuardName.CURRENT_CONTAINMENT, "current_containment_denied")
             if not isinstance(resolved, ResolvedWorkspacePath):
                 return _failed(GuardName.CURRENT_CONTAINMENT, "malformed_containment_response")
+            if action.action_kind is ActionKind.PATCH and resolved.followed_link:
+                return _failed(GuardName.CURRENT_CONTAINMENT, "patch_link_target_denied")
         return _passed(GuardName.CURRENT_CONTAINMENT, "current_containment_verified")
     except Exception:
         return _failed(GuardName.CURRENT_CONTAINMENT, "containment_dependency_failure")

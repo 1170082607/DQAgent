@@ -3,26 +3,35 @@
 from __future__ import annotations
 
 import codecs
+import hashlib
 import json
 import math
 import os
+import re
+import tempfile
 import time
 from collections import deque
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from contextlib import suppress
+from contextvars import ContextVar
+from dataclasses import dataclass, replace
 from fnmatch import fnmatchcase
-from pathlib import PurePosixPath
-from typing import Final
+from pathlib import Path, PurePosixPath
+from typing import Final, cast
 
-from dqagent.models import ToolDefinition
+from dqagent.models import ToolDefinition, ToolErrorCode
 from dqagent.tool_governance import (
     ActionExecutionResult,
     ActionKind,
     ActionPolicy,
     ApprovalProvider,
+    CanonicalJsonValue,
     DefaultActionPolicy,
     EffectiveLimits,
     EffectKind,
+    EffectPrecondition,
+    EffectPreconditions,
+    EffectState,
     GuardContext,
     PostActionHook,
     PreActionHook,
@@ -30,7 +39,9 @@ from dqagent.tool_governance import (
     PreparedAction,
 )
 from dqagent.tools import (
+    ActionExecutionError,
     ActionOutputSanitizer,
+    ActionPreparationError,
     ActionTool,
     GuardContextFactory,
     ToolExecutionContext,
@@ -38,6 +49,7 @@ from dqagent.tools import (
 )
 from dqagent.workspace import (
     PathKind,
+    ResolvedWorkspacePath,
     Workspace,
     WorkspaceError,
     WorkspacePurpose,
@@ -52,6 +64,8 @@ __all__ = [
     "WORKSPACE_READ_SCHEMA",
     "WORKSPACE_SEARCH_INPUT_SCHEMA",
     "WORKSPACE_SEARCH_SCHEMA",
+    "WORKSPACE_PATCH_INPUT_SCHEMA",
+    "WORKSPACE_PATCH_SCHEMA",
     "CodingToolLimits",
     "create_coding_tool_registry",
     "create_coding_tools",
@@ -59,6 +73,8 @@ __all__ = [
     "create_workspace_read_tool",
     "create_workspace_search_action_tool",
     "create_workspace_search_tool",
+    "create_workspace_patch_action_tool",
+    "create_workspace_patch_tool",
 ]
 
 
@@ -77,12 +93,22 @@ _DEFAULT_MAX_SEARCH_ELAPSED_SECONDS: Final[float] = 5.0
 _DEFAULT_MAX_SEARCH_OUTPUT_CHARACTERS: Final[int] = 16_000
 _DEFAULT_MAX_QUERY_CHARACTERS: Final[int] = 4_096
 _DEFAULT_MAX_GLOB_CHARACTERS: Final[int] = 512
+_DEFAULT_MAX_PATCH_CONTENT_BYTES: Final[int] = 1_000_000
+_DEFAULT_MAX_PATCH_REPLACEMENTS: Final[int] = 64
+_DEFAULT_MAX_PATCH_REPLACEMENT_CHARACTERS: Final[int] = 64_000
+_DEFAULT_MAX_PATCH_ELAPSED_SECONDS: Final[float] = 5.0
+_DEFAULT_MAX_PATCH_OUTPUT_CHARACTERS: Final[int] = 4_096
 _SCHEMA_MAX_PATH_CHARACTERS: Final[int] = 4_096
 _SCHEMA_MAX_START_LINE: Final[int] = 10_000_000
 _SCHEMA_MAX_LINE_COUNT: Final[int] = 100_000
 _SCHEMA_MAX_QUERY_CHARACTERS: Final[int] = 4_096
 _SCHEMA_MAX_GLOB_CHARACTERS: Final[int] = 512
 _SCHEMA_MAX_MATCHES: Final[int] = 100_000
+_SCHEMA_MAX_PATCH_CONTENT_CHARACTERS: Final[int] = 1_000_000
+_SCHEMA_MAX_PATCH_REPLACEMENTS: Final[int] = 1_024
+_SCHEMA_MAX_PATCH_REPLACEMENT_CHARACTERS: Final[int] = 1_000_000
+_SCHEMA_MAX_PATCH_OCCURRENCES: Final[int] = 100_000
+_PATCH_WILDCARD_CHARACTERS: Final[frozenset[str]] = frozenset("*?[]")
 _READ_MARKER: Final[str] = "...[line-limit]"
 _OUTPUT_MARKER: Final[str] = "...[output-limit]"
 _MIN_READ_OUTPUT_CHARACTERS: Final[int] = len(
@@ -90,6 +116,9 @@ _MIN_READ_OUTPUT_CHARACTERS: Final[int] = len(
 )
 _MIN_SEARCH_OUTPUT_CHARACTERS: Final[int] = len(
     '{"output_limit":true,"status":"output_limit","tool":"workspace_search"}'
+)
+_MIN_PATCH_OUTPUT_CHARACTERS: Final[int] = len(
+    '{"output_limit":true,"status":"output_limit","tool":"workspace_patch"}'
 )
 _CHUNK_BYTES: Final[int] = 64 * 1024
 _OMISSION_KEYS: Final[tuple[str, ...]] = (
@@ -132,6 +161,42 @@ _CODING_FIXED_SERIALIZED_LITERALS: Final[frozenset[str]] = frozenset(
         *_OMISSION_KEYS,
         "workspace_read",
         "workspace_search",
+        "workspace_patch",
+        "operation",
+        "create",
+        "update",
+        "delete",
+        "content",
+        "expected_sha256",
+        "replacements",
+        "old",
+        "new",
+        "expected_occurrences",
+        "bytes",
+        "bytes_written",
+        "bytes_deleted",
+        "replacement_count",
+        "effect_state",
+        "none",
+        "partial",
+        "unknown",
+        "created",
+        "updated",
+        "deleted",
+        "patch_link_target_denied",
+        "patch_precondition_conflict",
+        "patch_target_race",
+        "patch_temp_create_failed",
+        "patch_temp_write_failed",
+        "patch_temp_cleanup_failed",
+        "patch_atomic_replace_failed",
+        "patch_delete_failed",
+        "patch_create_open_failed",
+        "patch_create_write_failed",
+        "patch_create_close_failed",
+        "patch_resource_limit",
+        "patch_elapsed_limit",
+        "patch_output_truncated",
         "workspace_tool",
         "ok",
         "empty",
@@ -207,9 +272,90 @@ WORKSPACE_SEARCH_SCHEMA: Mapping[str, object] = {
     "additionalProperties": False,
 }
 
+WORKSPACE_PATCH_SCHEMA: Mapping[str, object] = {
+    "type": "object",
+    "properties": {
+        "operation": {
+            "type": "string",
+            "enum": ["create", "update", "delete"],
+        },
+        "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": _SCHEMA_MAX_PATH_CHARACTERS,
+        },
+        "content": {
+            "type": "string",
+            "maxLength": _SCHEMA_MAX_PATCH_CONTENT_CHARACTERS,
+        },
+        "expected_sha256": {
+            "type": "string",
+            "pattern": r"^[0-9a-f]{64}$",
+        },
+        "replacements": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": _SCHEMA_MAX_PATCH_REPLACEMENTS,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "old": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": _SCHEMA_MAX_PATCH_REPLACEMENT_CHARACTERS,
+                    },
+                    "new": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": _SCHEMA_MAX_PATCH_REPLACEMENT_CHARACTERS,
+                    },
+                    "expected_occurrences": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": _SCHEMA_MAX_PATCH_OCCURRENCES,
+                    },
+                },
+                "required": ["old", "new", "expected_occurrences"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["operation", "path"],
+    "additionalProperties": False,
+    "allOf": [
+        {
+            "if": {"properties": {"operation": {"const": "create"}}},
+            "then": {
+                "required": ["content"],
+                "not": {
+                    "anyOf": [
+                        {"required": ["expected_sha256"]},
+                        {"required": ["replacements"]},
+                    ]
+                },
+            },
+        },
+        {
+            "if": {"properties": {"operation": {"const": "update"}}},
+            "then": {
+                "required": ["expected_sha256", "replacements"],
+                "not": {"required": ["content"]},
+            },
+        },
+        {
+            "if": {"properties": {"operation": {"const": "delete"}}},
+            "then": {
+                "required": ["expected_sha256"],
+                "not": {"anyOf": [{"required": ["content"]}, {"required": ["replacements"]}]},
+            },
+        },
+    ],
+}
+
 # Keep both names available for callers that distinguish tool and input schemas.
 WORKSPACE_READ_INPUT_SCHEMA = WORKSPACE_READ_SCHEMA
 WORKSPACE_SEARCH_INPUT_SCHEMA = WORKSPACE_SEARCH_SCHEMA
+WORKSPACE_PATCH_INPUT_SCHEMA = WORKSPACE_PATCH_SCHEMA
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,6 +377,11 @@ class CodingToolLimits:
     max_search_output_characters: int = _DEFAULT_MAX_SEARCH_OUTPUT_CHARACTERS
     max_query_characters: int = _DEFAULT_MAX_QUERY_CHARACTERS
     max_glob_characters: int = _DEFAULT_MAX_GLOB_CHARACTERS
+    max_patch_content_bytes: int = _DEFAULT_MAX_PATCH_CONTENT_BYTES
+    max_patch_replacements: int = _DEFAULT_MAX_PATCH_REPLACEMENTS
+    max_patch_replacement_characters: int = _DEFAULT_MAX_PATCH_REPLACEMENT_CHARACTERS
+    max_patch_elapsed_seconds: float = _DEFAULT_MAX_PATCH_ELAPSED_SECONDS
+    max_patch_output_characters: int = _DEFAULT_MAX_PATCH_OUTPUT_CHARACTERS
 
     def __post_init__(self) -> None:
         for name in (
@@ -247,6 +398,10 @@ class CodingToolLimits:
             "max_search_output_characters",
             "max_query_characters",
             "max_glob_characters",
+            "max_patch_content_bytes",
+            "max_patch_replacements",
+            "max_patch_replacement_characters",
+            "max_patch_output_characters",
         ):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
@@ -254,6 +409,7 @@ class CodingToolLimits:
         for name, minimum in (
             ("max_read_output_characters", _MIN_READ_OUTPUT_CHARACTERS),
             ("max_search_output_characters", _MIN_SEARCH_OUTPUT_CHARACTERS),
+            ("max_patch_output_characters", _MIN_PATCH_OUTPUT_CHARACTERS),
         ):
             if getattr(self, name) < minimum:
                 raise ValueError(f"{name} must fit the compact structured output header")
@@ -267,6 +423,15 @@ class CodingToolLimits:
             ):
                 raise ValueError(f"{name} must be a finite number greater than zero")
             object.__setattr__(self, name, float(value))
+        value = self.max_patch_elapsed_seconds
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            or float(value) <= 0
+        ):
+            raise ValueError("max_patch_elapsed_seconds must be a finite number greater than zero")
+        object.__setattr__(self, "max_patch_elapsed_seconds", float(value))
 
 
 DEFAULT_CODING_TOOL_LIMITS = CodingToolLimits()
@@ -279,6 +444,93 @@ class _SearchElapsedLimit(Exception):
 
 class _ReadElapsedLimit(Exception):
     """Internal cooperative read ceiling, converted to bounded evidence."""
+
+
+class _PatchBudget:
+    """Cooperative elapsed budget for one patch call."""
+
+    def __init__(self, context: ToolExecutionContext, duration_seconds: float) -> None:
+        self._context = context
+        self._deadline = time.monotonic() + duration_seconds
+
+    def check(self, *, effect_state: EffectState = EffectState.NONE) -> None:
+        self._context.run_context.check_active()
+        if time.monotonic() >= self._deadline:
+            raise ActionExecutionError(
+                ToolErrorCode.RESOURCE_LIMIT,
+                "workspace patch elapsed limit exceeded",
+                effect_state=effect_state,
+                diagnostics=("patch_elapsed_limit",),
+            )
+
+    def check_preparation(self) -> None:
+        self._context.run_context.check_active()
+        if time.monotonic() >= self._deadline:
+            raise ActionPreparationError(
+                ToolErrorCode.RESOURCE_LIMIT,
+                "workspace patch elapsed limit exceeded",
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class _PendingPatchBudget:
+    action: PreparedAction
+    context: ToolExecutionContext
+    context_run_id: str
+    budget: _PatchBudget
+
+
+_PENDING_PATCH_BUDGET: ContextVar[tuple[_PendingPatchBudget, ...]] = ContextVar(
+    "dqagent_pending_patch_budget",
+    default=(),
+)
+
+
+def _active_patch_budget(
+    action: PreparedAction,
+    context: ToolExecutionContext,
+) -> _PatchBudget | None:
+    for pending in reversed(_PENDING_PATCH_BUDGET.get()):
+        if (
+            pending.action is action
+            and pending.context is context
+            and pending.context_run_id == context.run_context.run_id
+        ):
+            return pending.budget
+    return None
+
+
+def _cleanup_patch_budget(
+    action: PreparedAction | None,
+    context: ToolExecutionContext,
+) -> None:
+    if action is None:
+        return
+    pending = _PENDING_PATCH_BUDGET.get()
+    run_id = context.run_context.run_id
+    for index in range(len(pending) - 1, -1, -1):
+        entry = pending[index]
+        if (
+            entry.action is action
+            and entry.context is context
+            and entry.context_run_id == run_id
+        ):
+            _PENDING_PATCH_BUDGET.set(pending[:index] + pending[index + 1 :])
+            return
+
+
+def _check_patch_budget(
+    budget: _PatchBudget | None,
+    *,
+    preparation: bool,
+    effect_state: EffectState = EffectState.NONE,
+) -> None:
+    if budget is None:
+        return
+    if preparation:
+        budget.check_preparation()
+    else:
+        budget.check(effect_state=effect_state)
 
 
 @dataclass(slots=True)
@@ -315,6 +567,13 @@ class _SearchFileResult:
     invalid_text: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class _PatchReplacement:
+    old: str
+    new: str
+    expected_occurrences: int
+
+
 def _read_tool_definition() -> ToolDefinition:
     return ToolDefinition(
         name="workspace_read",
@@ -328,6 +587,17 @@ def _search_tool_definition() -> ToolDefinition:
         name="workspace_search",
         description="Search contained workspace files for one bounded literal query.",
         input_schema=WORKSPACE_SEARCH_SCHEMA,
+    )
+
+
+def _patch_tool_definition() -> ToolDefinition:
+    return ToolDefinition(
+        name="workspace_patch",
+        description=(
+            "Apply one governed create, exact replacement update, or digest-checked delete "
+            "to one contained UTF-8 workspace file."
+        ),
+        input_schema=WORKSPACE_PATCH_SCHEMA,
     )
 
 
@@ -483,6 +753,1073 @@ def _prepare_search(
             f"max_matches={max_matches}"
         ),
         secret_values=secret_values,
+    )
+
+
+def _patch_workspace_error(error: WorkspaceError, *, operation: str) -> ActionPreparationError:
+    reason = str(error.reason_code)
+    if reason in {WorkspaceReason.PROTECTED.value, WorkspaceReason.SECRET.value}:
+        code = ToolErrorCode.PROTECTED_RESOURCE_DENIED
+    elif reason in {WorkspaceReason.LINK_ESCAPE.value, WorkspaceReason.CONTAINMENT.value}:
+        code = ToolErrorCode.CONTAINMENT_DENIED
+    elif reason in {WorkspaceReason.TARGET_MISSING.value, WorkspaceReason.PARENT_MISSING.value}:
+        code = (
+            ToolErrorCode.PRECONDITION_CONFLICT
+            if operation in {"update", "delete"}
+            else ToolErrorCode.CONTAINMENT_DENIED
+        )
+    elif reason == WorkspaceReason.TARGET_KIND.value:
+        code = ToolErrorCode.PRECONDITION_CONFLICT
+    else:
+        code = ToolErrorCode.GOVERNANCE_FAILURE
+    return ActionPreparationError(code, "workspace patch target could not be prepared")
+
+
+def _normalize_patch_path(workspace: Workspace, raw_path: object) -> PurePosixPath:
+    if not isinstance(raw_path, str) or not raw_path:
+        raise ActionPreparationError(
+            ToolErrorCode.INVALID_ARGUMENTS,
+            "patch path must be non-empty",
+        )
+    if any(character in _PATCH_WILDCARD_CHARACTERS for character in raw_path):
+        raise ActionPreparationError(
+            ToolErrorCode.INVALID_ARGUMENTS,
+            "workspace patch paths do not support wildcard patterns",
+        )
+    try:
+        return workspace.normalize(raw_path, purpose=WorkspacePurpose.PATCH)
+    except WorkspaceError as error:
+        raise _patch_workspace_error(error, operation="create") from error
+
+
+def _resolve_patch_target(
+    workspace: Workspace,
+    path: PurePosixPath,
+    *,
+    operation: str,
+) -> ResolvedWorkspacePath:
+    try:
+        resolved = workspace.resolve(path, purpose=WorkspacePurpose.PATCH)
+    except WorkspaceError as error:
+        raise _patch_workspace_error(error, operation=operation) from error
+    if resolved.followed_link:
+        raise ActionPreparationError(
+            ToolErrorCode.CONTAINMENT_DENIED,
+            "workspace patch targets may not be links",
+        )
+    if operation == "create":
+        if not resolved.is_missing:
+            raise ActionPreparationError(
+                ToolErrorCode.PRECONDITION_CONFLICT,
+                "workspace patch create target already exists",
+            )
+    elif not resolved.is_file:
+        raise ActionPreparationError(
+            ToolErrorCode.PRECONDITION_CONFLICT,
+            "workspace patch target is not a regular file",
+        )
+    return resolved
+
+
+def _revalidate_patch_target(
+    workspace: Workspace,
+    resolved: ResolvedWorkspacePath,
+    *,
+    operation: str,
+) -> ResolvedWorkspacePath:
+    try:
+        current = workspace.revalidate(resolved)
+    except WorkspaceError as error:
+        raise ActionExecutionError(
+            ToolErrorCode.PRECONDITION_CONFLICT,
+            "workspace patch precondition changed before effect",
+            effect_state=EffectState.NONE,
+            diagnostics=("patch_precondition_conflict",),
+        ) from error
+    if current.followed_link:
+        raise ActionExecutionError(
+            ToolErrorCode.CONTAINMENT_DENIED,
+            "workspace patch target became a link",
+            effect_state=EffectState.NONE,
+            diagnostics=("patch_link_target_denied",),
+        )
+    if operation == "create" and not current.is_missing:
+        raise ActionExecutionError(
+            ToolErrorCode.PRECONDITION_CONFLICT,
+            "workspace patch create target appeared before effect",
+            effect_state=EffectState.NONE,
+            diagnostics=("patch_target_race",),
+        )
+    if operation != "create" and not current.is_file:
+        raise ActionExecutionError(
+            ToolErrorCode.PRECONDITION_CONFLICT,
+            "workspace patch target changed kind before effect",
+            effect_state=EffectState.NONE,
+            diagnostics=("patch_precondition_conflict",),
+        )
+    return current
+
+
+def _read_patch_bytes(
+    resolved: ResolvedWorkspacePath,
+    *,
+    max_bytes: int,
+    budget: _PatchBudget | None = None,
+    preparation: bool = False,
+) -> bytes:
+    _check_patch_budget(budget, preparation=preparation)
+    try:
+        file_size = int(os.stat(resolved.path, follow_symlinks=False).st_size)
+    except (OSError, ValueError) as error:
+        raise ActionPreparationError(
+            ToolErrorCode.EXECUTION_ERROR,
+            "workspace patch target could not be inspected",
+        ) from error
+    if file_size > max_bytes:
+        raise ActionPreparationError(
+            ToolErrorCode.RESOURCE_LIMIT,
+            "workspace patch source exceeds the configured byte limit",
+        )
+    _check_patch_budget(budget, preparation=preparation)
+    try:
+        with open(resolved.path, "rb") as handle:
+            raw = handle.read(max_bytes + 1)
+    except (OSError, ValueError) as error:
+        raise ActionPreparationError(
+            ToolErrorCode.EXECUTION_ERROR,
+            "workspace patch target could not be read",
+        ) from error
+    _check_patch_budget(budget, preparation=preparation)
+    if len(raw) > max_bytes:
+        raise ActionPreparationError(
+            ToolErrorCode.RESOURCE_LIMIT,
+            "workspace patch source exceeds the configured byte limit",
+        )
+    return raw
+
+
+def _encode_patch_text(value: object, *, label: str) -> bytes:
+    if not isinstance(value, str):
+        raise ActionPreparationError(ToolErrorCode.INVALID_ARGUMENTS, f"patch {label} must be text")
+    if "\x00" in value:
+        raise ActionPreparationError(
+            ToolErrorCode.INVALID_ARGUMENTS,
+            f"patch {label} must not contain NUL characters",
+        )
+    try:
+        return value.encode("utf-8")
+    except UnicodeEncodeError as error:
+        raise ActionPreparationError(
+            ToolErrorCode.INVALID_ARGUMENTS,
+            f"patch {label} must be valid UTF-8",
+        ) from error
+
+
+def _decode_patch_text(raw: bytes) -> str:
+    if b"\x00" in raw:
+        raise ActionPreparationError(
+            ToolErrorCode.INVALID_ARGUMENTS,
+            "workspace patch update does not support binary content",
+        )
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ActionPreparationError(
+            ToolErrorCode.INVALID_ARGUMENTS,
+            "workspace patch update requires valid UTF-8 content",
+        ) from error
+
+
+def _expected_patch_digest(value: object) -> str:
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+        raise ActionPreparationError(
+            ToolErrorCode.INVALID_ARGUMENTS,
+            "patch expected_sha256 must be a lowercase SHA-256 digest",
+        )
+    return value
+
+
+def _normalize_patch_replacements(
+    raw: object,
+    *,
+    limits: CodingToolLimits,
+    budget: _PatchBudget | None = None,
+) -> tuple[_PatchReplacement, ...]:
+    _check_patch_budget(budget, preparation=True)
+    if not isinstance(raw, list) or not raw:
+        raise ActionPreparationError(
+            ToolErrorCode.INVALID_ARGUMENTS,
+            "patch update requires ordered replacements",
+        )
+    if len(raw) > limits.max_patch_replacements:
+        raise ActionPreparationError(
+            ToolErrorCode.RESOURCE_LIMIT,
+            "patch replacement count exceeds the configured limit",
+        )
+    replacements: list[_PatchReplacement] = []
+    total_characters = 0
+    for item in raw:
+        _check_patch_budget(budget, preparation=True)
+        if not isinstance(item, Mapping):
+            raise ActionPreparationError(
+                ToolErrorCode.INVALID_ARGUMENTS,
+                "patch replacements must be objects",
+            )
+        old = item.get("old")
+        new = item.get("new")
+        expected = item.get("expected_occurrences")
+        if not isinstance(old, str) or not old:
+            raise ActionPreparationError(
+                ToolErrorCode.INVALID_ARGUMENTS,
+                "patch replacement old text must be non-empty",
+            )
+        if not isinstance(new, str) or not new:
+            raise ActionPreparationError(
+                ToolErrorCode.INVALID_ARGUMENTS,
+                "patch replacement new text must be non-empty",
+            )
+        if isinstance(expected, bool) or not isinstance(expected, int) or expected < 0:
+            raise ActionPreparationError(
+                ToolErrorCode.INVALID_ARGUMENTS,
+                "patch replacement expected_occurrences must be non-negative",
+            )
+        _encode_patch_text(old, label="replacement old")
+        _encode_patch_text(new, label="replacement new")
+        _check_patch_budget(budget, preparation=True)
+        total_characters += len(old) + len(new)
+        if total_characters > limits.max_patch_replacement_characters:
+            raise ActionPreparationError(
+                ToolErrorCode.RESOURCE_LIMIT,
+                "patch replacement text exceeds the configured limit",
+            )
+        replacements.append(_PatchReplacement(old, new, expected))
+    _check_patch_budget(budget, preparation=True)
+    return tuple(replacements)
+
+
+def _apply_patch_replacements(
+    content: str,
+    replacements: Sequence[_PatchReplacement],
+    *,
+    max_bytes: int,
+    budget: _PatchBudget | None = None,
+    preparation: bool = False,
+) -> str:
+    current = content
+    for replacement in replacements:
+        _check_patch_budget(budget, preparation=preparation)
+        occurrences = current.count(replacement.old)
+        _check_patch_budget(budget, preparation=preparation)
+        if occurrences != replacement.expected_occurrences:
+            raise ActionPreparationError(
+                ToolErrorCode.PRECONDITION_CONFLICT,
+                "workspace patch replacement occurrence count conflicted",
+            )
+        current_bytes = len(_encode_patch_text(current, label="updated content"))
+        old_bytes = len(_encode_patch_text(replacement.old, label="replacement old"))
+        new_bytes = len(_encode_patch_text(replacement.new, label="replacement new"))
+        projected_bytes = current_bytes + occurrences * (new_bytes - old_bytes)
+        if projected_bytes > max_bytes:
+            raise ActionPreparationError(
+                ToolErrorCode.RESOURCE_LIMIT,
+                "workspace patch updated content exceeds the configured byte limit",
+            )
+        _check_patch_budget(budget, preparation=preparation)
+        current = current.replace(replacement.old, replacement.new)
+        _check_patch_budget(budget, preparation=preparation)
+        if len(_encode_patch_text(current, label="updated content")) > max_bytes:
+            raise ActionPreparationError(
+                ToolErrorCode.RESOURCE_LIMIT,
+                "workspace patch updated content exceeds the configured byte limit",
+            )
+        _check_patch_budget(budget, preparation=preparation)
+    return current
+
+
+def _patch_replacement_identity(
+    replacements: Sequence[_PatchReplacement],
+) -> list[dict[str, object]]:
+    return [
+        {
+            "old": replacement.old,
+            "new": replacement.new,
+            "expected_occurrences": replacement.expected_occurrences,
+        }
+        for replacement in replacements
+    ]
+
+
+def _patch_preconditions(
+    path: PurePosixPath,
+    *,
+    exists: bool,
+    digest: str | None = None,
+) -> EffectPreconditions:
+    return EffectPreconditions(
+        (
+            EffectPrecondition(
+                path,
+                expected_kind=PathKind.REGULAR_FILE.value if exists else PathKind.MISSING.value,
+                expected_sha256=digest,
+                must_exist=exists,
+            ),
+        )
+    )
+
+
+def _prepare_patch(
+    arguments: Mapping[str, object],
+    context: ToolExecutionContext,
+    *,
+    workspace: Workspace,
+    limits: CodingToolLimits,
+    secret_values: tuple[str, ...],
+    budget: _PatchBudget,
+) -> PreparedAction:
+    budget.check_preparation()
+    operation = arguments.get("operation")
+    budget.check_preparation()
+    if operation not in {"create", "update", "delete"}:
+        raise ActionPreparationError(
+            ToolErrorCode.INVALID_ARGUMENTS,
+            "workspace patch operation is unsupported",
+        )
+    path = _normalize_patch_path(workspace, arguments.get("path"))
+    budget.check_preparation()
+    normalized: dict[str, object] = {
+        "operation": operation,
+        "path": str(path),
+        "max_content_bytes": limits.max_patch_content_bytes,
+        "max_replacements": limits.max_patch_replacements,
+        "max_replacement_characters": limits.max_patch_replacement_characters,
+    }
+
+    if operation == "create":
+        content = arguments.get("content")
+        budget.check_preparation()
+        content_bytes = _encode_patch_text(content, label="content")
+        budget.check_preparation()
+        if len(content_bytes) > limits.max_patch_content_bytes:
+            raise ActionPreparationError(
+                ToolErrorCode.RESOURCE_LIMIT,
+                "workspace patch content exceeds the configured byte limit",
+            )
+        resolved = _resolve_patch_target(workspace, path, operation=operation)
+        budget.check_preparation()
+        try:
+            workspace.revalidate(resolved)
+        except WorkspaceError as error:
+            raise ActionPreparationError(
+                ToolErrorCode.PRECONDITION_CONFLICT,
+                "workspace patch create target changed during preparation",
+            ) from error
+        budget.check_preparation()
+        normalized["content"] = content
+        normalized["content_sha256"] = hashlib.sha256(content_bytes).hexdigest()
+        budget.check_preparation()
+        preconditions = _patch_preconditions(path, exists=False)
+    elif operation == "update":
+        expected_digest = _expected_patch_digest(arguments.get("expected_sha256"))
+        budget.check_preparation()
+        replacements = _normalize_patch_replacements(
+            arguments.get("replacements"),
+            limits=limits,
+            budget=budget,
+        )
+        budget.check_preparation()
+        resolved = _resolve_patch_target(workspace, path, operation=operation)
+        budget.check_preparation()
+        raw = _read_patch_bytes(
+            resolved,
+            max_bytes=limits.max_patch_content_bytes,
+            budget=budget,
+            preparation=True,
+        )
+        budget.check_preparation()
+        try:
+            workspace.revalidate(resolved)
+        except WorkspaceError as error:
+            raise ActionPreparationError(
+                ToolErrorCode.PRECONDITION_CONFLICT,
+                "workspace patch target changed during preparation",
+            ) from error
+        budget.check_preparation()
+        actual_digest = hashlib.sha256(raw).hexdigest()
+        budget.check_preparation()
+        if actual_digest != expected_digest:
+            raise ActionPreparationError(
+                ToolErrorCode.PRECONDITION_CONFLICT,
+                "workspace patch expected digest does not match",
+            )
+        content = _decode_patch_text(raw)
+        budget.check_preparation()
+        _apply_patch_replacements(
+            content,
+            replacements,
+            max_bytes=limits.max_patch_content_bytes,
+            budget=budget,
+            preparation=True,
+        )
+        budget.check_preparation()
+        normalized["expected_sha256"] = expected_digest
+        normalized["replacements"] = _patch_replacement_identity(replacements)
+        budget.check_preparation()
+        preconditions = _patch_preconditions(path, exists=True, digest=expected_digest)
+    else:
+        expected_digest = _expected_patch_digest(arguments.get("expected_sha256"))
+        budget.check_preparation()
+        resolved = _resolve_patch_target(workspace, path, operation=operation)
+        budget.check_preparation()
+        raw = _read_patch_bytes(
+            resolved,
+            max_bytes=limits.max_patch_content_bytes,
+            budget=budget,
+            preparation=True,
+        )
+        budget.check_preparation()
+        try:
+            workspace.revalidate(resolved)
+        except WorkspaceError as error:
+            raise ActionPreparationError(
+                ToolErrorCode.PRECONDITION_CONFLICT,
+                "workspace patch target changed during preparation",
+            ) from error
+        budget.check_preparation()
+        actual_digest = hashlib.sha256(raw).hexdigest()
+        budget.check_preparation()
+        if actual_digest != expected_digest:
+            raise ActionPreparationError(
+                ToolErrorCode.PRECONDITION_CONFLICT,
+                "workspace patch expected digest does not match",
+            )
+        normalized["expected_sha256"] = expected_digest
+        budget.check_preparation()
+        preconditions = _patch_preconditions(path, exists=True, digest=expected_digest)
+
+    action = PreparedAction(
+        ActionKind.PATCH,
+        EffectKind.WORKSPACE_MUTATION,
+        workspace.scope.workspace_id,
+        logical_targets=(path,),
+        normalized_fields=cast(Mapping[str, CanonicalJsonValue], normalized),
+        preconditions=preconditions,
+        limits=_effective_limits(
+            limits,
+            output_characters=limits.max_patch_output_characters,
+            elapsed_seconds=limits.max_patch_elapsed_seconds,
+        ),
+        display_text=f"workspace_patch operation={operation} path={path}",
+        secret_values=secret_values,
+    )
+    budget.check_preparation()
+    return action
+
+
+def _patch_current_preconditions(
+    action: PreparedAction,
+    *,
+    workspace: Workspace,
+    limits: CodingToolLimits,
+    budget: _PatchBudget | None = None,
+) -> EffectPreconditions:
+    path = action.logical_targets[0]
+    expected = action.preconditions.items[0]
+    try:
+        resolved = workspace.resolve(path, purpose=WorkspacePurpose.PATCH)
+    except WorkspaceError:
+        return EffectPreconditions(
+            (EffectPrecondition(path, expected_kind="unavailable", must_exist=None),)
+        )
+    if resolved.followed_link:
+        return EffectPreconditions(
+            (EffectPrecondition(path, expected_kind="link", must_exist=True),)
+        )
+    if resolved.is_missing:
+        return _patch_preconditions(path, exists=False)
+    if not resolved.is_file:
+        return EffectPreconditions(
+            (EffectPrecondition(path, expected_kind="other", must_exist=True),)
+        )
+    if expected.expected_sha256 is None:
+        return _patch_preconditions(path, exists=True)
+    try:
+        _check_patch_budget(budget, preparation=False)
+        raw = _read_patch_bytes(
+            resolved,
+            max_bytes=limits.max_patch_content_bytes,
+            budget=budget,
+        )
+        _check_patch_budget(budget, preparation=False)
+    except (ActionExecutionError, ActionPreparationError):
+        return EffectPreconditions(
+            (EffectPrecondition(path, expected_kind="unavailable", must_exist=True),)
+        )
+    return _patch_preconditions(
+        path,
+        exists=True,
+        digest=hashlib.sha256(raw).hexdigest(),
+    )
+
+
+def _patch_guard_context_factory(
+    workspace: Workspace,
+    *,
+    base_context: GuardContext | None,
+    supplied_factory: GuardContextFactory | None,
+    limits: CodingToolLimits,
+) -> GuardContextFactory:
+    def factory(action: PreparedAction, context: ToolExecutionContext) -> GuardContext:
+        selected = (
+            supplied_factory(action, context)
+            if supplied_factory is not None
+            else base_context
+        )
+        if not isinstance(selected, GuardContext):
+            raise TypeError("patch guard context factory returned an invalid GuardContext")
+        if selected.workspace.scope != workspace.scope:
+            raise ValueError("patch guard context is bound to a different workspace")
+        return replace(
+            selected,
+            current_preconditions=_patch_current_preconditions(
+                action,
+                workspace=workspace,
+                limits=limits,
+                budget=_active_patch_budget(action, context),
+            ),
+        )
+
+    return factory
+
+
+def _patch_replacements_from_action(action: PreparedAction) -> tuple[_PatchReplacement, ...]:
+    raw = action.normalized_fields.get("replacements")
+    if not isinstance(raw, tuple):
+        raise ValueError("prepared patch replacements are malformed")
+    values: list[_PatchReplacement] = []
+    for item in raw:
+        if not isinstance(item, Mapping):
+            raise ValueError("prepared patch replacement is malformed")
+        old = item.get("old")
+        new = item.get("new")
+        expected = item.get("expected_occurrences")
+        if (
+            not isinstance(old, str)
+            or not old
+            or not isinstance(new, str)
+            or not new
+            or isinstance(expected, bool)
+            or not isinstance(expected, int)
+            or expected < 0
+        ):
+            raise ValueError("prepared patch replacement is malformed")
+        values.append(_PatchReplacement(old, new, expected))
+    return tuple(values)
+
+
+def _patch_execution_precondition_error(error: Exception) -> ActionExecutionError:
+    code = (
+        error.code
+        if isinstance(error, ActionPreparationError)
+        else ToolErrorCode.PRECONDITION_CONFLICT
+    )
+    diagnostic = (
+        "patch_resource_limit"
+        if code is ToolErrorCode.RESOURCE_LIMIT
+        else "patch_precondition_conflict"
+    )
+    return ActionExecutionError(
+        code,
+        "workspace patch precondition failed at the effect boundary",
+        effect_state=EffectState.NONE,
+        diagnostics=(diagnostic,),
+    )
+
+
+def _patch_success(
+    action: PreparedAction,
+    *,
+    operation: str,
+    status: str,
+    **attributes: object,
+) -> ActionExecutionResult:
+    header: dict[str, object] = {
+        "operation": operation,
+        "path": str(action.logical_targets[0]),
+        "status": status,
+        "tool": "workspace_patch",
+        **attributes,
+    }
+    output, output_limited = _render_bounded_output(
+        header,
+        (),
+        action.limits.max_output_characters,
+    )
+    diagnostics = ("patch_output_truncated",) if output_limited else ()
+    return ActionExecutionResult(output, diagnostics=diagnostics)
+
+
+def _cleanup_patch_temp(path: Path) -> bool:
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _write_patch_temp_and_replace(
+    action: PreparedAction,
+    *,
+    target: Path,
+    content: bytes,
+    budget: _PatchBudget,
+) -> None:
+    file_descriptor: int | None = None
+    temporary_path: Path | None = None
+    handle = None
+
+    def cleanup_once() -> bool:
+        nonlocal temporary_path
+        if temporary_path is None:
+            return True
+        path = temporary_path
+        temporary_path = None
+        return _cleanup_patch_temp(path)
+
+    def close_open_resources() -> None:
+        nonlocal file_descriptor
+        nonlocal handle
+        if handle is not None:
+            with suppress(Exception):
+                handle.close()
+            handle = None
+        if file_descriptor is not None:
+            with suppress(OSError):
+                os.close(file_descriptor)
+            file_descriptor = None
+
+    try:
+        budget.check()
+        try:
+            file_descriptor, raw_temporary_path = tempfile.mkstemp(
+                prefix=".dqagent-patch-",
+                suffix=".tmp",
+                dir=str(target.parent),
+            )
+            temporary_path = Path(raw_temporary_path)
+        except (OSError, ValueError) as error:
+            raise ActionExecutionError(
+                ToolErrorCode.EXECUTION_ERROR,
+                "workspace patch temporary file could not be created",
+                effect_state=EffectState.NONE,
+                diagnostics=("patch_temp_create_failed",),
+            ) from error
+
+        budget.check()
+        try:
+            handle = os.fdopen(file_descriptor, "wb")
+            file_descriptor = None
+        except Exception as error:
+            if file_descriptor is not None:
+                with suppress(OSError):
+                    os.close(file_descriptor)
+                file_descriptor = None
+            cleanup_succeeded = cleanup_once()
+            diagnostics = ["patch_temp_write_failed"]
+            if not cleanup_succeeded:
+                diagnostics.append("patch_temp_cleanup_failed")
+            raise ActionExecutionError(
+                ToolErrorCode.EXECUTION_ERROR,
+                "workspace patch temporary file could not be opened",
+                effect_state=EffectState.PARTIAL
+                if not cleanup_succeeded
+                else EffectState.NONE,
+                diagnostics=tuple(diagnostics),
+            ) from error
+
+        budget.check()
+        try:
+            written = handle.write(content)
+            if written != len(content):
+                raise OSError("temporary file short write")
+        except Exception as error:
+            close_open_resources()
+            cleanup_succeeded = cleanup_once()
+            diagnostics = ["patch_temp_write_failed"]
+            if not cleanup_succeeded:
+                diagnostics.append("patch_temp_cleanup_failed")
+            raise ActionExecutionError(
+                ToolErrorCode.EXECUTION_ERROR,
+                "workspace patch temporary file write failed",
+                effect_state=EffectState.PARTIAL
+                if not cleanup_succeeded
+                else EffectState.NONE,
+                diagnostics=tuple(diagnostics),
+            ) from error
+
+        budget.check()
+        try:
+            handle.close()
+        except Exception as error:
+            handle = None
+            cleanup_succeeded = cleanup_once()
+            diagnostics = ["patch_temp_write_failed"]
+            if not cleanup_succeeded:
+                diagnostics.append("patch_temp_cleanup_failed")
+            raise ActionExecutionError(
+                ToolErrorCode.EXECUTION_ERROR,
+                "workspace patch temporary file close failed",
+                effect_state=EffectState.PARTIAL
+                if not cleanup_succeeded
+                else EffectState.NONE,
+                diagnostics=tuple(diagnostics),
+            ) from error
+        handle = None
+
+        budget.check()
+        try:
+            os.replace(temporary_path, target)
+        except Exception as error:
+            cleanup_succeeded = cleanup_once()
+            diagnostics = ["patch_atomic_replace_failed"]
+            if not cleanup_succeeded:
+                diagnostics.append("patch_temp_cleanup_failed")
+            raise ActionExecutionError(
+                ToolErrorCode.EXECUTION_ERROR,
+                "workspace patch atomic replacement failed",
+                effect_state=EffectState.UNKNOWN,
+                diagnostics=tuple(diagnostics),
+            ) from error
+        temporary_path = None
+        budget.check(effect_state=EffectState.UNKNOWN)
+    except ActionExecutionError as error:
+        close_open_resources()
+        if temporary_path is not None:
+            cleanup_succeeded = cleanup_once()
+            if not cleanup_succeeded:
+                cleanup_diagnostics = tuple(
+                    (*error.diagnostics, "patch_temp_cleanup_failed")
+                )
+                raise ActionExecutionError(
+                    error.code,
+                    str(error),
+                    effect_state=(
+                        EffectState.PARTIAL
+                        if error.effect_state is EffectState.NONE
+                        else error.effect_state
+                    ),
+                    diagnostics=cleanup_diagnostics,
+                ) from error
+        raise
+    except Exception as error:
+        close_open_resources()
+        cleanup_succeeded = cleanup_once()
+        diagnostics = ["patch_atomic_replace_failed"]
+        if not cleanup_succeeded:
+            diagnostics.append("patch_temp_cleanup_failed")
+        raise ActionExecutionError(
+            ToolErrorCode.EXECUTION_ERROR,
+            "workspace patch update failed",
+            effect_state=EffectState.UNKNOWN,
+            diagnostics=tuple(diagnostics),
+        ) from error
+    finally:
+        close_open_resources()
+        if temporary_path is not None:
+            cleanup_once()
+
+
+def _execute_patch_create(
+    action: PreparedAction,
+    context: ToolExecutionContext,
+    *,
+    workspace: Workspace,
+    limits: CodingToolLimits,
+    budget: _PatchBudget,
+) -> ActionExecutionResult:
+    path = action.logical_targets[0]
+    content = action.normalized_fields.get("content")
+    try:
+        budget.check()
+        content_bytes = _encode_patch_text(content, label="content")
+        if len(content_bytes) > limits.max_patch_content_bytes:
+            raise ActionPreparationError(
+                ToolErrorCode.RESOURCE_LIMIT,
+                "workspace patch content exceeds the configured byte limit",
+            )
+        budget.check()
+        resolved = _resolve_patch_target(workspace, path, operation="create")
+        budget.check()
+        _revalidate_patch_target(workspace, resolved, operation="create")
+        budget.check()
+    except ActionExecutionError:
+        raise
+    except (ActionPreparationError, WorkspaceError) as error:
+        raise _patch_execution_precondition_error(error) from error
+
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_BINARY"):
+        flags |= os.O_BINARY
+    file_descriptor: int | None = None
+    try:
+        budget.check()
+        file_descriptor = os.open(resolved.path, flags, 0o666)
+    except FileExistsError as error:
+        raise ActionExecutionError(
+            ToolErrorCode.PRECONDITION_CONFLICT,
+            "workspace patch create target appeared during exclusive open",
+            effect_state=EffectState.NONE,
+            diagnostics=("patch_target_race",),
+        ) from error
+    except OSError as error:
+        raise ActionExecutionError(
+            ToolErrorCode.EXECUTION_ERROR,
+            "workspace patch create target could not be opened",
+            effect_state=EffectState.NONE,
+            diagnostics=("patch_create_open_failed",),
+        ) from error
+
+    handle = None
+    try:
+        budget.check(effect_state=EffectState.PARTIAL)
+        try:
+            handle = os.fdopen(file_descriptor, "wb")
+            file_descriptor = None
+        except Exception as error:
+            raise ActionExecutionError(
+                ToolErrorCode.EXECUTION_ERROR,
+                "workspace patch create file could not be opened for writing",
+                effect_state=EffectState.PARTIAL,
+                diagnostics=("patch_create_write_failed",),
+            ) from error
+        try:
+            budget.check(effect_state=EffectState.PARTIAL)
+        except ActionExecutionError:
+            with suppress(Exception):
+                handle.close()
+            raise
+        try:
+            written = handle.write(content_bytes)
+            if written != len(content_bytes):
+                raise OSError("created file short write")
+        except Exception as error:
+            with suppress(Exception):
+                handle.close()
+            raise ActionExecutionError(
+                ToolErrorCode.EXECUTION_ERROR,
+                "workspace patch create write failed",
+                effect_state=EffectState.PARTIAL,
+                diagnostics=("patch_create_write_failed",),
+            ) from error
+        try:
+            budget.check(effect_state=EffectState.PARTIAL)
+        except ActionExecutionError:
+            with suppress(Exception):
+                handle.close()
+            raise
+        try:
+            handle.close()
+        except Exception as error:
+            raise ActionExecutionError(
+                ToolErrorCode.EXECUTION_ERROR,
+                "workspace patch create close failed",
+                effect_state=EffectState.PARTIAL,
+                diagnostics=("patch_create_close_failed",),
+            ) from error
+        handle = None
+        budget.check(effect_state=EffectState.PARTIAL)
+    finally:
+        if file_descriptor is not None:
+            with suppress(OSError):
+                os.close(file_descriptor)
+    result = _patch_success(
+        action,
+        operation="create",
+        status="created",
+        bytes_written=len(content_bytes),
+    )
+    budget.check(effect_state=EffectState.UNKNOWN)
+    return result
+
+
+def _execute_patch_update(
+    action: PreparedAction,
+    context: ToolExecutionContext,
+    *,
+    workspace: Workspace,
+    limits: CodingToolLimits,
+    budget: _PatchBudget,
+) -> ActionExecutionResult:
+    path = action.logical_targets[0]
+    expected_digest = action.normalized_fields.get("expected_sha256")
+    if not isinstance(expected_digest, str):
+        raise ActionExecutionError(
+            ToolErrorCode.GOVERNANCE_FAILURE,
+            "prepared workspace patch digest is malformed",
+            effect_state=EffectState.NONE,
+            diagnostics=("patch_precondition_conflict",),
+        )
+    try:
+        budget.check()
+        replacements = _patch_replacements_from_action(action)
+        budget.check()
+        resolved = _resolve_patch_target(workspace, path, operation="update")
+        budget.check()
+        raw = _read_patch_bytes(
+            resolved,
+            max_bytes=limits.max_patch_content_bytes,
+            budget=budget,
+        )
+        budget.check()
+        _revalidate_patch_target(workspace, resolved, operation="update")
+        budget.check()
+        if hashlib.sha256(raw).hexdigest() != expected_digest:
+            raise ActionPreparationError(
+                ToolErrorCode.PRECONDITION_CONFLICT,
+                "workspace patch expected digest changed before effect",
+            )
+        content = _decode_patch_text(raw)
+        budget.check()
+        updated = _apply_patch_replacements(
+            content,
+            replacements,
+            max_bytes=limits.max_patch_content_bytes,
+            budget=budget,
+        )
+        budget.check()
+        updated_bytes = _encode_patch_text(updated, label="updated content")
+        budget.check()
+        _revalidate_patch_target(workspace, resolved, operation="update")
+        budget.check()
+    except ActionExecutionError:
+        raise
+    except (ActionPreparationError, WorkspaceError) as error:
+        raise _patch_execution_precondition_error(error) from error
+    _write_patch_temp_and_replace(
+        action,
+        target=resolved.path,
+        content=updated_bytes,
+        budget=budget,
+    )
+    budget.check(effect_state=EffectState.UNKNOWN)
+    result = _patch_success(
+        action,
+        operation="update",
+        status="updated",
+        bytes_written=len(updated_bytes),
+        replacement_count=len(replacements),
+    )
+    budget.check(effect_state=EffectState.UNKNOWN)
+    return result
+
+
+def _execute_patch_delete(
+    action: PreparedAction,
+    context: ToolExecutionContext,
+    *,
+    workspace: Workspace,
+    limits: CodingToolLimits,
+    budget: _PatchBudget,
+) -> ActionExecutionResult:
+    path = action.logical_targets[0]
+    expected_digest = action.normalized_fields.get("expected_sha256")
+    if not isinstance(expected_digest, str):
+        raise ActionExecutionError(
+            ToolErrorCode.GOVERNANCE_FAILURE,
+            "prepared workspace patch digest is malformed",
+            effect_state=EffectState.NONE,
+            diagnostics=("patch_precondition_conflict",),
+        )
+    try:
+        budget.check()
+        resolved = _resolve_patch_target(workspace, path, operation="delete")
+        budget.check()
+        raw = _read_patch_bytes(
+            resolved,
+            max_bytes=limits.max_patch_content_bytes,
+            budget=budget,
+        )
+        budget.check()
+        _revalidate_patch_target(workspace, resolved, operation="delete")
+        budget.check()
+        if hashlib.sha256(raw).hexdigest() != expected_digest:
+            raise ActionPreparationError(
+                ToolErrorCode.PRECONDITION_CONFLICT,
+                "workspace patch expected digest changed before delete",
+            )
+        _revalidate_patch_target(workspace, resolved, operation="delete")
+        budget.check()
+    except ActionExecutionError:
+        raise
+    except (ActionPreparationError, WorkspaceError) as error:
+        raise _patch_execution_precondition_error(error) from error
+    try:
+        os.remove(resolved.path)
+    except FileNotFoundError as error:
+        raise ActionExecutionError(
+            ToolErrorCode.PRECONDITION_CONFLICT,
+            "workspace patch delete target disappeared before removal",
+            effect_state=EffectState.UNKNOWN,
+            diagnostics=("patch_delete_failed",),
+        ) from error
+    except OSError as error:
+        raise ActionExecutionError(
+            ToolErrorCode.EXECUTION_ERROR,
+            "workspace patch delete failed",
+            effect_state=EffectState.UNKNOWN,
+            diagnostics=("patch_delete_failed",),
+        ) from error
+    budget.check(effect_state=EffectState.UNKNOWN)
+    result = _patch_success(
+        action,
+        operation="delete",
+        status="deleted",
+        bytes_deleted=len(raw),
+    )
+    budget.check(effect_state=EffectState.UNKNOWN)
+    return result
+
+
+def _execute_patch(
+    action: PreparedAction,
+    context: ToolExecutionContext,
+    *,
+    workspace: Workspace,
+    limits: CodingToolLimits,
+    budget: _PatchBudget,
+) -> ActionExecutionResult:
+    budget.check()
+    operation = action.normalized_fields.get("operation")
+    if operation == "create":
+        return _execute_patch_create(
+            action,
+            context,
+            workspace=workspace,
+            limits=limits,
+            budget=budget,
+        )
+    if operation == "update":
+        return _execute_patch_update(
+            action,
+            context,
+            workspace=workspace,
+            limits=limits,
+            budget=budget,
+        )
+    if operation == "delete":
+        return _execute_patch_delete(
+            action,
+            context,
+            workspace=workspace,
+            limits=limits,
+            budget=budget,
+        )
+    raise ActionExecutionError(
+        ToolErrorCode.GOVERNANCE_FAILURE,
+        "prepared workspace patch operation is malformed",
+        effect_state=EffectState.NONE,
+        diagnostics=("patch_precondition_conflict",),
     )
 
 
@@ -1540,8 +2877,96 @@ def create_workspace_search_tool(
     )
 
 
+def create_workspace_patch_tool(
+    workspace: Workspace,
+    *,
+    limits: CodingToolLimits | None = None,
+    guard_context: GuardContext | None = None,
+    guard_context_factory: GuardContextFactory | None = None,
+    policy: ActionPolicy | None = None,
+    approval_provider: ApprovalProvider | None = None,
+    pre_hooks: Sequence[PreActionHook | PreActionHookSpec] = (),
+    post_hooks: Sequence[PostActionHook] = (),
+    secret_values: Iterable[str] = (),
+    max_governed_calls: int = 1,
+) -> ActionTool:
+    selected_limits = limits or DEFAULT_CODING_TOOL_LIMITS
+    secrets = tuple(secret_values)
+    _validate_coding_secret_values(secrets)
+    selected_context = guard_context
+    if selected_context is None and guard_context_factory is None:
+        selected_context = _default_guard_context(
+            workspace,
+            selected_limits,
+            output_characters=selected_limits.max_patch_output_characters,
+            elapsed_seconds=selected_limits.max_patch_elapsed_seconds,
+            max_governed_calls=max_governed_calls,
+        )
+    dynamic_factory = _patch_guard_context_factory(
+        workspace,
+        base_context=selected_context,
+        supplied_factory=guard_context_factory,
+        limits=selected_limits,
+    )
+
+    def prepare_patch(
+        arguments: Mapping[str, object],
+        context: ToolExecutionContext,
+    ) -> PreparedAction:
+        budget = _PatchBudget(context, selected_limits.max_patch_elapsed_seconds)
+        action = _prepare_patch(
+            arguments,
+            context,
+            workspace=workspace,
+            limits=selected_limits,
+            secret_values=secrets,
+            budget=budget,
+        )
+        _PENDING_PATCH_BUDGET.set(
+            (
+                *_PENDING_PATCH_BUDGET.get(),
+                _PendingPatchBudget(action, context, context.run_context.run_id, budget),
+            )
+        )
+        return action
+
+    def execute_patch(
+        action: PreparedAction,
+        context: ToolExecutionContext,
+    ) -> ActionExecutionResult:
+        budget = _active_patch_budget(action, context)
+        if budget is None:
+            budget = _PatchBudget(context, action.limits.max_duration_seconds)
+        try:
+            return _execute_patch(
+                action,
+                context,
+                workspace=workspace,
+                limits=selected_limits,
+                budget=budget,
+            )
+        finally:
+            _cleanup_patch_budget(action, context)
+
+    return ActionTool(
+        _patch_tool_definition(),
+        prepare_patch,
+        execute_patch,
+        guard_context_factory=dynamic_factory,
+        policy=policy or DefaultActionPolicy(),
+        approval_provider=approval_provider,
+        pre_hooks=tuple(pre_hooks),
+        post_hooks=tuple(post_hooks),
+        secret_values=secrets,
+        output_sanitizer=_coding_output_sanitizer(secrets),
+        max_argument_bytes=selected_limits.max_argument_bytes,
+        action_cleanup=_cleanup_patch_budget,
+    )
+
+
 create_workspace_read_action_tool = create_workspace_read_tool
 create_workspace_search_action_tool = create_workspace_search_tool
+create_workspace_patch_action_tool = create_workspace_patch_tool
 
 
 def create_coding_tools(
@@ -1556,7 +2981,7 @@ def create_coding_tools(
     post_hooks: Sequence[PostActionHook] = (),
     secret_values: Iterable[str] = (),
     max_governed_calls: int = 1,
-) -> tuple[ActionTool, ActionTool]:
+) -> tuple[ActionTool, ActionTool, ActionTool]:
     selected_limits = limits or DEFAULT_CODING_TOOL_LIMITS
     secrets = tuple(secret_values)
     selected_context = guard_context
@@ -1567,10 +2992,12 @@ def create_coding_tools(
             output_characters=max(
                 selected_limits.max_read_output_characters,
                 selected_limits.max_search_output_characters,
+                selected_limits.max_patch_output_characters,
             ),
             elapsed_seconds=max(
                 selected_limits.max_read_elapsed_seconds,
                 selected_limits.max_search_elapsed_seconds,
+                selected_limits.max_patch_elapsed_seconds,
             ),
             max_governed_calls=max_governed_calls,
         )
@@ -1588,6 +3015,18 @@ def create_coding_tools(
             max_governed_calls=max_governed_calls,
         ),
         create_workspace_search_tool(
+            workspace,
+            limits=selected_limits,
+            guard_context=selected_context,
+            guard_context_factory=guard_context_factory,
+            policy=policy,
+            approval_provider=approval_provider,
+            pre_hooks=pre_hooks,
+            post_hooks=post_hooks,
+            secret_values=secrets,
+            max_governed_calls=max_governed_calls,
+        ),
+        create_workspace_patch_tool(
             workspace,
             limits=selected_limits,
             guard_context=selected_context,
