@@ -331,6 +331,7 @@ src/dqagent/execution.py Run identity, deadline, and cancellation context
 src/dqagent/events.py Shared agent/workflow lifecycle events
 src/dqagent/evaluation.py Behavioral case loader, runner, checks, and reports
 src/dqagent/context.py Prompt assembly, knowledge loading, budgets, and compaction
+src/dqagent/repository_context.py Contained target-aware AGENTS.md loading and provenance
 src/dqagent/session.py Durable transcript model and session stores
 src/dqagent/context_evaluation.py Deterministic context regression runner
 src/dqagent/retrieval.py Ingestion, embedding, local index, retrieval, and provenance

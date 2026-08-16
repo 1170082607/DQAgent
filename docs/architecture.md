@@ -719,6 +719,13 @@ WorkspaceDiff -> immutable WorkspaceSnapshot + bounded unified projection
   same subprocess boundary, never become model tools or approval requests, and produce bounded
   pass/fail/unavailable/timeout/cancellation results. An empty validator set yields
   `not_validated`; model success claims never override the evidence-derived verdict.
+- Phase 9 T10 loads only the fixed composition-selected `AGENTS.md` name along explicit target
+  ancestor chains resolved by `Workspace`. Shared files are deduplicated and ordered from root to
+  deeper scope; admitted bodies carry source, digest, applicability, selection, and
+  `repository_guidance` authority, while optional oversized files produce bounded omission evidence.
+  Missing parents, path ambiguity, containment/link denial, unreadable files, and invalid UTF-8 fail
+  context preparation. The loader does not scan the repository, infer paths from prose, or project
+  mutable guidance into host policy.
 
 ## Configuration
 
@@ -767,6 +774,9 @@ the runtime's model-attempt budget and defaults to three. All values are validat
   handling, same-size digest changes, target versus global/forbidden completeness, each snapshot
   and rendered-diff limit, cancellation, stable ordering, normalized line endings, binary/oversized
   metadata, and incomplete evidence propagation.
+- Repository-context tests assert explicit target resolution, existing/create ancestor chains,
+  deterministic hierarchy ordering, shared-file deduplication, atomic individual/aggregate budget
+  omissions, invalid/denied/escaping resources, hostile-content authority, and content-free evidence.
 - Governance tests assert golden canonicalization/digest sensitivity, immutable contracts, fixed
   guard ordering, hard-guard non-overridability, tri-state policy outcomes, fail-closed dependency
   behavior, unified call-capacity checks without reservation, executor non-invocation, and sanitized
