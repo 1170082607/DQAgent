@@ -2,14 +2,14 @@
 
 ## Status
 
-This document describes the implemented Phase 8 T5-T13 architecture and the Phase 9 T1-T8
+This document describes the implemented Phase 8 T5-T13 architecture and the Phase 9 T1-T9
 foundations. Memory management is available as a model-free explicit application service,
 request-time policy-filtered recall, an optional durable session read stage, a bounded context
 projection, a pure source-to-transient-candidate extraction boundary, and independent memory/session
 CLI composition. Phase 9 currently has workspace authority/observation, prepared-action governance,
 exact foreground approval, synchronous hook contracts, a governed execution/runtime bridge, bounded
-workspace read/search/patch tools, and local bounded subprocess contracts; command adapters,
-validators, and the foreground coding application remain later checkpoints.
+workspace read/search/patch tools, local bounded subprocess contracts, and governed command/validator
+composition; the foreground coding application remains a later checkpoint.
 The roadmap remains the source of truth for deferred capabilities.
 
 ## System Context
@@ -711,7 +711,14 @@ WorkspaceDiff -> immutable WorkspaceSnapshot + bounded unified projection
   allowlisted environment, no stdin, wall/output ceilings, concurrent bounded stream draining,
   decode/truncation evidence, and direct-child termination/reaping. The local backend declares no
   process-group or descendant cleanup and no host filesystem, network, credential, syscall, or
-  workspace-only isolation; T9 owns command/validator composition.
+  workspace-only isolation.
+- Phase 9 T9 composes `workspace_command` from a strict model schema and trusted executable/env
+  configuration. It projects bounded subprocess output into the model result and action record,
+  denies missing backend capabilities before spawn, and keeps nonzero command status separate from
+  workspace-effect evidence. Harness-owned `ValidatorDefinition` values run sequentially on the
+  same subprocess boundary, never become model tools or approval requests, and produce bounded
+  pass/fail/unavailable/timeout/cancellation results. An empty validator set yields
+  `not_validated`; model success claims never override the evidence-derived verdict.
 
 ## Configuration
 

@@ -120,6 +120,7 @@ class ActionExecutionError(Exception):
         *,
         effect_state: EffectState,
         diagnostics: Sequence[str] = (),
+        output: str | None = None,
     ) -> None:
         if not isinstance(code, ToolErrorCode):
             raise TypeError("action execution error code must be a ToolErrorCode")
@@ -129,10 +130,13 @@ class ActionExecutionError(Exception):
             diagnostics = tuple(diagnostics)
         if len(diagnostics) > 8 or any(not isinstance(item, str) for item in diagnostics):
             raise ValueError("action execution error diagnostics are malformed or unbounded")
+        if output is not None and (not isinstance(output, str) or not output.strip()):
+            raise ValueError("action execution error output must be non-empty text")
         super().__init__(message)
         self.code = code
         self.effect_state = effect_state
         self.diagnostics = diagnostics
+        self.output = output
 
 
 class GuardContextFactory(Protocol):
@@ -1099,6 +1103,7 @@ class ActionTool:
             executor_error: Exception | None = None
             execution_result: ActionExecutionResult | None = None
             output = "governed action execution produced no observation"
+            execution_output: str | None = None
             output_observation_failure = False
             output_truncated = False
             try:
@@ -1124,7 +1129,18 @@ class ActionTool:
                 effect_state = error.effect_state
                 execution_error_code = error.code
                 diagnostics.extend(error.diagnostics)
-                output_observation_failure = False
+                execution_output = error.output
+                if execution_output is not None:
+                    output, output_truncated, output_observation_failure = self._sanitize_output(
+                        effect_guard_context,
+                        execution_output,
+                        action.limits.max_output_characters,
+                    )
+                    execution_output = output
+                    if output_observation_failure:
+                        diagnostics.append("action_output_sanitization_failed")
+                    elif output_truncated:
+                        diagnostics.append("action_output_truncated")
             except Exception as error:
                 executor_error = error
                 effect_state = EffectState.UNKNOWN
@@ -1205,6 +1221,7 @@ class ActionTool:
                     record,
                     executor_error,
                     effect_guard_context,
+                    output=execution_output,
                 )
             if observation_failure:
                 return self._error_execution(
@@ -1522,9 +1539,10 @@ class ActionTool:
         error_type: str | None = None,
         error_message: str | None = None,
         record: ActionRecord | None = None,
+        output: str | None = None,
     ) -> ToolExecution:
         return ToolExecution(
-            ToolRegistry._error(call, code, message),
+            ToolRegistry._error(call, code, output or message),
             error_type or code.value,
             error_message or message,
             record,
@@ -1538,6 +1556,7 @@ class ActionTool:
         record: ActionRecord,
         error: Exception,
         guard_context: GuardContext,
+        output: str | None = None,
     ) -> ToolExecution:
         diagnostic = self._safe_text(guard_context, str(error))
         return self._error_execution(
@@ -1547,6 +1566,7 @@ class ActionTool:
             error_type=type(error).__name__,
             error_message=diagnostic,
             record=record,
+            output=output,
         )
 
 

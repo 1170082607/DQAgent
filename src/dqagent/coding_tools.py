@@ -14,12 +14,22 @@ from collections import deque
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import suppress
 from contextvars import ContextVar
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath
 from typing import Final, cast
 
 from dqagent.models import ToolDefinition, ToolErrorCode
+from dqagent.subprocesses import (
+    IsolationCapability,
+    LocalSubprocessRunner,
+    SubprocessRequest,
+    SubprocessResult,
+    SubprocessRunner,
+    SubprocessStatus,
+    build_minimal_environment,
+    normalize_isolation_capabilities,
+)
 from dqagent.tool_governance import (
     ActionExecutionResult,
     ActionKind,
@@ -50,6 +60,7 @@ from dqagent.tools import (
 from dqagent.workspace import (
     PathKind,
     ResolvedWorkspacePath,
+    Sanitizer,
     Workspace,
     WorkspaceError,
     WorkspacePurpose,
@@ -66,6 +77,10 @@ __all__ = [
     "WORKSPACE_SEARCH_SCHEMA",
     "WORKSPACE_PATCH_INPUT_SCHEMA",
     "WORKSPACE_PATCH_SCHEMA",
+    "WORKSPACE_COMMAND_INPUT_SCHEMA",
+    "WORKSPACE_COMMAND_SCHEMA",
+    "CommandExecutable",
+    "CommandToolLimits",
     "CodingToolLimits",
     "create_coding_tool_registry",
     "create_coding_tools",
@@ -75,6 +90,8 @@ __all__ = [
     "create_workspace_search_tool",
     "create_workspace_patch_action_tool",
     "create_workspace_patch_tool",
+    "create_workspace_command_action_tool",
+    "create_workspace_command_tool",
 ]
 
 
@@ -108,6 +125,10 @@ _SCHEMA_MAX_PATCH_CONTENT_CHARACTERS: Final[int] = 1_000_000
 _SCHEMA_MAX_PATCH_REPLACEMENTS: Final[int] = 1_024
 _SCHEMA_MAX_PATCH_REPLACEMENT_CHARACTERS: Final[int] = 1_000_000
 _SCHEMA_MAX_PATCH_OCCURRENCES: Final[int] = 100_000
+_SCHEMA_MAX_COMMAND_ARGV_ITEMS: Final[int] = 128
+_SCHEMA_MAX_COMMAND_ARGUMENT_CHARACTERS: Final[int] = 32_000
+_SCHEMA_MAX_COMMAND_ARGUMENT_LENGTH: Final[int] = 8_192
+_SCHEMA_MAX_COMMAND_TIMEOUT_SECONDS: Final[float] = 86_400.0
 _PATCH_WILDCARD_CHARACTERS: Final[frozenset[str]] = frozenset("*?[]")
 _READ_MARKER: Final[str] = "...[line-limit]"
 _OUTPUT_MARKER: Final[str] = "...[output-limit]"
@@ -217,6 +238,26 @@ _CODING_FIXED_SERIALIZED_LITERALS: Final[frozenset[str]] = frozenset(
 )
 _CODING_JSON_SYNTAX_TOKENS: Final[frozenset[str]] = frozenset(
     {"{", "}", '"', ":", ","}
+)
+
+_DEFAULT_COMMAND_ARGV_ITEMS: Final[int] = 128
+_DEFAULT_COMMAND_ARGV_CHARACTERS: Final[int] = 32_000
+_DEFAULT_COMMAND_TIMEOUT_SECONDS: Final[float] = 30.0
+_DEFAULT_COMMAND_STDOUT_BYTES: Final[int] = 32_000
+_DEFAULT_COMMAND_STDERR_BYTES: Final[int] = 32_000
+_DEFAULT_COMMAND_OUTPUT_CHARACTERS: Final[int] = 32_000
+_DEFAULT_COMMAND_ARGUMENT_BYTES: Final[int] = 64_000
+_COMMAND_REQUIRED_CAPABILITIES: Final[frozenset[IsolationCapability]] = frozenset(
+    {
+        IsolationCapability.DIRECT_ARGV,
+        IsolationCapability.WORKING_DIRECTORY_CONTROL,
+        IsolationCapability.ALLOWLISTED_ENVIRONMENT,
+        IsolationCapability.NO_STDIN,
+        IsolationCapability.WALL_TIME_LIMIT,
+        IsolationCapability.BOUNDED_OUTPUT,
+        IsolationCapability.DIRECT_CHILD_TERMINATION,
+        IsolationCapability.DIRECT_CHILD_REAP,
+    }
 )
 
 
@@ -352,10 +393,144 @@ WORKSPACE_PATCH_SCHEMA: Mapping[str, object] = {
     ],
 }
 
+WORKSPACE_COMMAND_SCHEMA: Mapping[str, object] = {
+    "type": "object",
+    "properties": {
+        "argv": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": _SCHEMA_MAX_COMMAND_ARGV_ITEMS,
+            "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": _SCHEMA_MAX_COMMAND_ARGUMENT_LENGTH,
+                "pattern": r"^[^\x00]*$",
+            },
+        },
+        "cwd": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": _SCHEMA_MAX_PATH_CHARACTERS,
+        },
+        "timeout_seconds": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": _SCHEMA_MAX_COMMAND_TIMEOUT_SECONDS,
+        },
+    },
+    "required": ["argv"],
+    "additionalProperties": False,
+}
+
 # Keep both names available for callers that distinguish tool and input schemas.
 WORKSPACE_READ_INPUT_SCHEMA = WORKSPACE_READ_SCHEMA
 WORKSPACE_SEARCH_INPUT_SCHEMA = WORKSPACE_SEARCH_SCHEMA
 WORKSPACE_PATCH_INPUT_SCHEMA = WORKSPACE_PATCH_SCHEMA
+WORKSPACE_COMMAND_INPUT_SCHEMA = WORKSPACE_COMMAND_SCHEMA
+
+
+@dataclass(frozen=True, slots=True)
+class CommandExecutable:
+    """A trusted executable mapping used by ``workspace_command``.
+
+    The model selects the opaque ``identity``.  The trusted composition owns
+    the resolved path and may mark a mapping as a shell interpreter.  Shell
+    mappings still require the command factory's explicit shell opt-in.
+    """
+
+    identity: str
+    path: Path
+    shell: bool = False
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.identity, str)
+            or not self.identity.strip()
+            or len(self.identity) > 128
+            or "\x00" in self.identity
+            or any(ord(character) < 32 for character in self.identity)
+            or "/" in self.identity
+            or "\\" in self.identity
+            or ":" in self.identity
+        ):
+            raise ValueError("executable identity must be an opaque non-empty name")
+        if not isinstance(self.path, Path):
+            raise TypeError("executable path must be a pathlib.Path")
+        try:
+            resolved = self.path.resolve(strict=False)
+        except (OSError, RuntimeError) as error:
+            raise ValueError("executable path could not be resolved") from error
+        if resolved.exists() and not resolved.is_file():
+            raise ValueError("executable path must identify a file")
+        if not isinstance(self.shell, bool):
+            raise TypeError("executable shell flag must be a boolean")
+        object.__setattr__(self, "path", resolved)
+
+
+@dataclass(frozen=True, slots=True)
+class _PreparedCommandAction(PreparedAction):
+    """Prepared command action carrying the executable resolved before approval."""
+
+    executable: CommandExecutable = field(kw_only=True)
+
+
+@dataclass(frozen=True, slots=True)
+class CommandToolLimits:
+    """Trusted argv, process, stream, and model-output limits."""
+
+    max_argv_items: int = _DEFAULT_COMMAND_ARGV_ITEMS
+    max_argv_characters: int = _DEFAULT_COMMAND_ARGV_CHARACTERS
+    max_timeout_seconds: float = _DEFAULT_COMMAND_TIMEOUT_SECONDS
+    max_stdout_bytes: int = _DEFAULT_COMMAND_STDOUT_BYTES
+    max_stderr_bytes: int = _DEFAULT_COMMAND_STDERR_BYTES
+    max_output_characters: int = _DEFAULT_COMMAND_OUTPUT_CHARACTERS
+    max_argument_bytes: int = _DEFAULT_COMMAND_ARGUMENT_BYTES
+
+    def __post_init__(self) -> None:
+        for name in (
+            "max_argv_items",
+            "max_argv_characters",
+            "max_stdout_bytes",
+            "max_stderr_bytes",
+            "max_output_characters",
+            "max_argument_bytes",
+        ):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValueError(f"{name} must be a positive integer")
+        if self.max_argv_items > _SCHEMA_MAX_COMMAND_ARGV_ITEMS:
+            raise ValueError("max_argv_items exceeds the command schema bound")
+        if self.max_argv_characters > _SCHEMA_MAX_COMMAND_ARGUMENT_CHARACTERS:
+            raise ValueError("max_argv_characters exceeds the command schema bound")
+        if (
+            isinstance(self.max_timeout_seconds, bool)
+            or not isinstance(self.max_timeout_seconds, (int, float))
+            or self.max_timeout_seconds <= 0
+            or not math.isfinite(float(self.max_timeout_seconds))
+        ):
+            raise ValueError("max_timeout_seconds must be a finite number greater than zero")
+        if self.max_timeout_seconds > _SCHEMA_MAX_COMMAND_TIMEOUT_SECONDS:
+            raise ValueError("max_timeout_seconds exceeds the command schema bound")
+
+    @property
+    def timeout_seconds(self) -> float:
+        return float(self.max_timeout_seconds)
+
+    @property
+    def stdout_limit_bytes(self) -> int:
+        return self.max_stdout_bytes
+
+    @property
+    def stderr_limit_bytes(self) -> int:
+        return self.max_stderr_bytes
+
+    @property
+    def stdout_max_bytes(self) -> int:
+        return self.max_stdout_bytes
+
+    @property
+    def stderr_max_bytes(self) -> int:
+        return self.max_stderr_bytes
 
 
 @dataclass(frozen=True, slots=True)
@@ -598,6 +773,210 @@ def _patch_tool_definition() -> ToolDefinition:
             "to one contained UTF-8 workspace file."
         ),
         input_schema=WORKSPACE_PATCH_SCHEMA,
+    )
+
+
+def _command_tool_definition() -> ToolDefinition:
+    return ToolDefinition(
+        name="workspace_command",
+        description=(
+            "Run one trusted allowlisted executable with bounded direct arguments in a "
+            "contained workspace directory."
+        ),
+        input_schema=WORKSPACE_COMMAND_SCHEMA,
+    )
+
+
+def _opaque_executable_identity(value: str) -> str:
+    candidate = Path(value).name if "/" in value or "\\" in value or ":" in value else value
+    if not candidate or any(
+        character in candidate for character in ("/", "\\", ":", "\x00")
+    ):
+        raise ValueError("executable allowlist identity must be an opaque name")
+    return candidate
+
+
+def _normalize_executable_allowlist(
+    allowlist: Mapping[str, str | Path | CommandExecutable] | None,
+    *,
+    shell_executables: Iterable[str],
+) -> tuple[tuple[str, CommandExecutable], ...]:
+    if allowlist is None:
+        return ()
+    if not isinstance(allowlist, Mapping):
+        raise TypeError("executable allowlist must be a mapping")
+    if isinstance(shell_executables, (str, bytes)):
+        raise TypeError("shell executables must be an iterable of names")
+    shell_names = tuple(shell_executables)
+    if any(not isinstance(name, str) or not name.strip() for name in shell_names):
+        raise ValueError("shell executable identities must be non-empty text")
+    entries: list[tuple[str, CommandExecutable]] = []
+    for raw_name, raw_value in allowlist.items():
+        if not isinstance(raw_name, str) or not raw_name.strip():
+            raise ValueError("executable allowlist names must be non-empty text")
+        identity = (
+            raw_value.identity
+            if isinstance(raw_value, CommandExecutable)
+            else _opaque_executable_identity(raw_name)
+        )
+        if isinstance(raw_value, CommandExecutable):
+            executable = raw_value
+        else:
+            if not isinstance(raw_value, (str, Path)):
+                raise TypeError("executable allowlist values must be paths or CommandExecutable")
+            executable = CommandExecutable(
+                identity,
+                Path(raw_value),
+                shell=identity in shell_names or raw_name in shell_names,
+            )
+        if raw_name in shell_names and not executable.shell:
+            executable = CommandExecutable(executable.identity, executable.path, shell=True)
+        if any(alias == raw_name for alias, _ in entries):
+            raise ValueError("executable allowlist identities must be unique")
+        entries.append((raw_name, executable))
+    return tuple(entries)
+
+
+def _resolve_command_executable(
+    requested: str,
+    entries: tuple[tuple[str, CommandExecutable], ...],
+    resolver: Callable[[str], CommandExecutable | Path | str | None] | None,
+) -> CommandExecutable | None:
+    if resolver is not None:
+        raw = resolver(requested)
+        if raw is None:
+            return None
+        if isinstance(raw, CommandExecutable):
+            return raw
+        if isinstance(raw, (str, Path)):
+            return CommandExecutable(_opaque_executable_identity(requested), Path(raw))
+        raise TypeError("trusted executable resolver returned an invalid value")
+
+    for alias, executable in entries:
+        if requested == alias or requested == executable.identity:
+            return executable
+        try:
+            if Path(requested).resolve(strict=False) == executable.path:
+                return executable
+        except (OSError, RuntimeError, ValueError):
+            continue
+    return None
+
+
+def _resolve_command_cwd(
+    workspace: Workspace,
+    raw_cwd: str,
+) -> tuple[PurePosixPath, Path]:
+    try:
+        if raw_cwd == ".":
+            resolved = workspace.resolve_root(purpose=WorkspacePurpose.COMMAND_CWD)
+        else:
+            logical = workspace.normalize(raw_cwd, purpose=WorkspacePurpose.COMMAND_CWD)
+            resolved = workspace.resolve(logical, purpose=WorkspacePurpose.COMMAND_CWD)
+    except WorkspaceError as error:
+        raise ActionPreparationError(
+            ToolErrorCode.CONTAINMENT_DENIED,
+            "command working directory is not contained",
+        ) from error
+    if not resolved.is_directory or resolved.followed_link:
+        raise ActionPreparationError(
+            ToolErrorCode.CONTAINMENT_DENIED,
+            "command working directory must be an existing contained directory",
+        )
+    return resolved.logical_path, resolved.path
+
+
+def _prepare_command(
+    arguments: Mapping[str, object],
+    context: ToolExecutionContext,
+    *,
+    workspace: Workspace,
+    limits: CommandToolLimits,
+    executable_entries: tuple[tuple[str, CommandExecutable], ...],
+    executable_resolver: Callable[[str], CommandExecutable | Path | str | None] | None,
+    allow_shell: bool,
+    required_capabilities: frozenset[IsolationCapability],
+    environment: Mapping[str, str],
+    secret_values: tuple[str, ...],
+) -> PreparedAction:
+    context.run_context.check_active()
+    raw_argv = arguments.get("argv")
+    if isinstance(raw_argv, (str, bytes)) or not isinstance(raw_argv, Sequence):
+        raise ValueError("argv must be a non-empty array of strings")
+    argv = tuple(raw_argv)
+    if not argv or len(argv) > limits.max_argv_items:
+        raise ValueError("argv exceeds its configured item bound")
+    characters = 0
+    if any(
+        not isinstance(argument, str) or not argument or "\x00" in argument
+        for argument in argv
+    ):
+        raise ValueError("argv arguments must be non-empty NUL-free strings")
+    for argument in argv:
+        characters += len(argument)
+    if characters > limits.max_argv_characters:
+        raise ValueError("argv exceeds its configured character bound")
+
+    executable = _resolve_command_executable(argv[0], executable_entries, executable_resolver)
+    if executable is None:
+        raise ActionPreparationError(
+            ToolErrorCode.POLICY_DENIED,
+            "command executable is not allowlisted",
+        )
+    if executable.shell and not allow_shell:
+        raise ActionPreparationError(
+            ToolErrorCode.POLICY_DENIED,
+            "shell executable is not enabled by trusted composition",
+        )
+
+    raw_cwd = arguments.get("cwd", ".")
+    if not isinstance(raw_cwd, str) or not raw_cwd:
+        raise ValueError("cwd must be non-empty text")
+    cwd, _cwd_path = _resolve_command_cwd(workspace, raw_cwd)
+
+    raw_timeout = arguments.get("timeout_seconds", limits.max_timeout_seconds)
+    if (
+        isinstance(raw_timeout, bool)
+        or not isinstance(raw_timeout, (int, float))
+        or not math.isfinite(float(raw_timeout))
+        or float(raw_timeout) <= 0
+    ):
+        raise ValueError("timeout_seconds must be a finite number greater than zero")
+    timeout = float(raw_timeout)
+    if timeout > limits.max_timeout_seconds:
+        raise ValueError("timeout_seconds may only tighten the configured ceiling")
+
+    normalized_argv = (executable.identity, *argv[1:])
+    normalized_fields: dict[str, CanonicalJsonValue] = {
+        "argv": tuple(normalized_argv),
+        "cwd": str(cwd),
+        "environment": tuple(sorted(environment)),
+        "shell": executable.shell,
+        "timeout_seconds": timeout,
+    }
+    return _PreparedCommandAction(
+        ActionKind.COMMAND,
+        EffectKind.PROCESS_EXECUTION,
+        workspace.scope.workspace_id,
+        cwd=cwd,
+        argv=normalized_argv,
+        executable_identity=executable.identity,
+        environment_identity=tuple(sorted(environment)),
+        normalized_fields=normalized_fields,
+        required_capabilities=required_capabilities,
+        limits=EffectiveLimits(
+            max_input_characters=limits.max_argument_bytes,
+            max_output_characters=limits.max_output_characters,
+            max_duration_seconds=timeout,
+            max_argv_items=limits.max_argv_items,
+            max_argv_characters=limits.max_argv_characters,
+        ),
+        display_text=(
+            f"workspace_command argv={list(normalized_argv)!r} cwd={cwd} "
+            f"timeout_seconds={timeout:g}"
+        ),
+        secret_values=secret_values,
+        executable=executable,
     )
 
 
@@ -1954,6 +2333,186 @@ def _coding_output_sanitizer(secret_values: tuple[str, ...]) -> ActionOutputSani
     return sanitize
 
 
+def _sanitize_command_value(value: object, sanitizer: Sanitizer) -> object:
+    if isinstance(value, str):
+        return sanitizer.sanitize(value)
+    if isinstance(value, list):
+        return [_sanitize_command_value(item, sanitizer) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: _sanitize_command_value(item, sanitizer)
+            for key, item in value.items()
+        }
+    return value
+
+
+def _command_output_sanitizer(secret_values: tuple[str, ...]) -> ActionOutputSanitizer:
+    def sanitize(
+        guard_context: GuardContext,
+        output: str,
+        max_characters: int,
+    ) -> tuple[str, bool, bool]:
+        raw_lines = output.splitlines()
+        if not raw_lines:
+            raise ValueError("command output is empty")
+        raw_header = json.loads(raw_lines[0])
+        if not isinstance(raw_header, dict):
+            raise ValueError("command output header is not an object")
+        sanitizer = guard_context.workspace.sanitizer(secrets=secret_values)
+        header = {
+            key: _sanitize_command_value(value, sanitizer)
+            for key, value in raw_header.items()
+        }
+        rendered, truncated = _render_bounded_output(header, (), max_characters)
+        return rendered, truncated, False
+
+    return sanitize
+
+
+def _command_result_payload(action: PreparedAction, result: SubprocessResult) -> str:
+    payload: dict[str, object] = {
+        "argv": list(action.argv),
+        "backend": result.backend_identity,
+        "backend_capabilities": [
+            capability.value for capability in result.backend_capabilities
+        ],
+        "cleanup": result.cleanup.status.value,
+        "cleanup_succeeded": result.cleanup_succeeded,
+        "cwd": str(action.cwd or PurePosixPath(".")),
+        "duration_seconds": result.duration_seconds,
+        "exit_code": result.returncode,
+        "stderr": result.stderr,
+        "stderr_decode_replacements": result.stderr_decode_replacements,
+        "stderr_truncated": result.stderr_truncated,
+        "stdout": result.stdout,
+        "stdout_decode_replacements": result.stdout_decode_replacements,
+        "stdout_truncated": result.stdout_truncated,
+        "status": result.status.value,
+        "tool": "workspace_command",
+    }
+    if result.diagnostic:
+        payload["diagnostic"] = result.diagnostic
+    if result.spawn_error is not None:
+        payload["spawn_error"] = result.spawn_error
+    if result.missing_capabilities:
+        payload["missing_capabilities"] = [
+            capability.value for capability in result.missing_capabilities
+        ]
+    return _render_header(payload).rstrip("\n")
+
+
+def _command_diagnostics(result: SubprocessResult) -> tuple[str, ...]:
+    diagnostics: list[str] = [f"subprocess_status={result.status.value}"]
+    if result.stdout_truncated:
+        diagnostics.append("stdout_truncated")
+    if result.stderr_truncated:
+        diagnostics.append("stderr_truncated")
+    if result.decode_replacements:
+        diagnostics.append("output_decode_replacements")
+    if not result.cleanup_succeeded and result.spawned:
+        diagnostics.append("cleanup_incomplete")
+    if result.diagnostic:
+        diagnostics.append(result.diagnostic)
+    return tuple(diagnostics[:8])
+
+
+def _execute_command(
+    action: PreparedAction,
+    context: ToolExecutionContext,
+    *,
+    workspace: Workspace,
+    allow_shell: bool,
+    environment: Mapping[str, str],
+    limits: CommandToolLimits,
+    runner: SubprocessRunner,
+) -> ActionExecutionResult:
+    if not isinstance(action, _PreparedCommandAction):
+        raise ActionExecutionError(
+            ToolErrorCode.GOVERNANCE_FAILURE,
+            "command executable binding is unavailable",
+            effect_state=EffectState.NONE,
+        )
+    executable = action.executable
+    if executable.shell and not allow_shell:
+        raise ActionExecutionError(
+            ToolErrorCode.POLICY_DENIED,
+            "shell executable is not enabled by trusted composition",
+            effect_state=EffectState.NONE,
+        )
+    command_cwd = action.cwd or PurePosixPath(".")
+    try:
+        if command_cwd == PurePosixPath("."):
+            resolved_cwd = workspace.resolve_root(purpose=WorkspacePurpose.COMMAND_CWD)
+        else:
+            resolved_cwd = workspace.resolve(command_cwd, purpose=WorkspacePurpose.COMMAND_CWD)
+    except WorkspaceError as error:
+        raise ActionExecutionError(
+            ToolErrorCode.CONTAINMENT_DENIED,
+            "command working directory is no longer contained",
+            effect_state=EffectState.NONE,
+        ) from error
+    if not resolved_cwd.is_directory or resolved_cwd.followed_link:
+        raise ActionExecutionError(
+            ToolErrorCode.CONTAINMENT_DENIED,
+            "command working directory is no longer an existing directory",
+            effect_state=EffectState.NONE,
+        )
+
+    request = SubprocessRequest(
+        argv=(str(executable.path), *action.argv[1:]),
+        cwd=resolved_cwd.path,
+        environment=environment,
+        timeout_seconds=action.limits.max_duration_seconds,
+        stdout_limit_bytes=limits.max_stdout_bytes,
+        stderr_limit_bytes=limits.max_stderr_bytes,
+        required_capabilities=action.required_capabilities,
+    )
+    result = runner.run(request, context.run_context)
+    payload = _command_result_payload(action, result)
+    diagnostics = _command_diagnostics(result)
+    if result.status in {
+        SubprocessStatus.CANCELLED,
+        SubprocessStatus.DEADLINE_EXCEEDED,
+    }:
+        context.run_context.check_active()
+    if result.status is SubprocessStatus.NORMAL and result.returncode == 0:
+        if not result.cleanup_succeeded:
+            raise ActionExecutionError(
+                ToolErrorCode.OBSERVATION_FAILURE,
+                "command cleanup did not complete",
+                effect_state=EffectState.UNKNOWN,
+                diagnostics=diagnostics,
+                output=payload,
+            )
+        return ActionExecutionResult(payload, EffectState.COMPLETE, diagnostics)
+
+    if result.status is SubprocessStatus.CAPABILITY_DENIED:
+        code = ToolErrorCode.CAPABILITY_MISSING
+        effect_state = EffectState.NONE
+    elif result.status is SubprocessStatus.TIMEOUT:
+        code = ToolErrorCode.TIMEOUT
+        effect_state = EffectState.UNKNOWN
+    elif result.status is SubprocessStatus.CANCELLED:
+        code = ToolErrorCode.EXECUTION_ERROR
+        effect_state = EffectState.UNKNOWN
+    elif result.status is SubprocessStatus.DEADLINE_EXCEEDED:
+        code = ToolErrorCode.TIMEOUT
+        effect_state = EffectState.UNKNOWN
+    elif result.status is SubprocessStatus.OUTPUT_SANITIZATION_ERROR:
+        code = ToolErrorCode.OBSERVATION_FAILURE
+        effect_state = EffectState.UNKNOWN
+    else:
+        code = ToolErrorCode.PROCESS_FAILURE
+        effect_state = EffectState.NONE if not result.spawned else EffectState.UNKNOWN
+    raise ActionExecutionError(
+        code,
+        "workspace command did not complete successfully",
+        effect_state=effect_state,
+        diagnostics=diagnostics,
+        output=payload,
+    )
+
+
 def _validate_coding_secret_values(secrets: tuple[str, ...]) -> None:
     if any(
         isinstance(secret, str)
@@ -2964,9 +3523,143 @@ def create_workspace_patch_tool(
     )
 
 
+def create_workspace_command_tool(
+    workspace: Workspace,
+    *,
+    limits: CommandToolLimits | None = None,
+    executable_allowlist: Mapping[str, str | Path | CommandExecutable] | None = None,
+    executable_resolver: Callable[[str], CommandExecutable | Path | str | None] | None = None,
+    environment_allowlist: Mapping[str, str] | Iterable[str] = (),
+    environment_source: Mapping[str, str] | None = None,
+    environment: Mapping[str, str] | Iterable[str] | None = None,
+    env: Mapping[str, str] | Iterable[str] | None = None,
+    secret_names: Iterable[str] = (),
+    secret_values: Iterable[str] = (),
+    shell_executables: Iterable[str] = (),
+    allow_shell: bool = False,
+    required_capabilities: Iterable[IsolationCapability] = (),
+    subprocess_runner: SubprocessRunner | None = None,
+    guard_context: GuardContext | None = None,
+    guard_context_factory: GuardContextFactory | None = None,
+    policy: ActionPolicy | None = None,
+    approval_provider: ApprovalProvider | None = None,
+    pre_hooks: Sequence[PreActionHook | PreActionHookSpec] = (),
+    post_hooks: Sequence[PostActionHook] = (),
+    max_governed_calls: int = 1,
+) -> ActionTool:
+    """Create the governed direct-argv command adapter.
+
+    Executable resolution and environment construction happen entirely in
+    trusted composition.  No model argument can add an executable, shell
+    mode, or environment variable.
+    """
+
+    if not isinstance(workspace, Workspace):
+        raise TypeError("workspace command requires a Workspace")
+    selected_limits = limits or CommandToolLimits()
+    if not isinstance(selected_limits, CommandToolLimits):
+        raise TypeError("command limits must be a CommandToolLimits")
+    if executable_allowlist is not None and executable_resolver is not None:
+        raise ValueError("provide executable_allowlist or executable_resolver, not both")
+    if executable_resolver is not None and not callable(executable_resolver):
+        raise TypeError("executable resolver must be callable")
+    entries = _normalize_executable_allowlist(
+        executable_allowlist,
+        shell_executables=shell_executables,
+    )
+    if not isinstance(allow_shell, bool):
+        raise TypeError("allow_shell must be a boolean")
+
+    if environment is not None and env is not None:
+        raise TypeError("provide environment or env, not both")
+    secrets = tuple(secret_values)
+    selected_environment: Mapping[str, str] | Iterable[str] = (
+        environment
+        if environment is not None
+        else env
+        if env is not None
+        else environment_allowlist
+    )
+    trusted_environment = build_minimal_environment(
+        selected_environment,
+        source=environment_source,
+        secret_names=secret_names,
+        secret_values=secrets,
+    )
+    _validate_coding_secret_values(secrets)
+    selected_capabilities = normalize_isolation_capabilities(
+        (*_COMMAND_REQUIRED_CAPABILITIES, *tuple(required_capabilities))
+    )
+    runner = subprocess_runner
+    if runner is None:
+        runner = LocalSubprocessRunner(
+            sanitizer=workspace.sanitizer(secrets=secrets),
+        )
+    runner_capabilities = getattr(runner, "capabilities", None)
+    runner_identity = getattr(runner, "backend_identity", None)
+    if runner_capabilities is None or runner_identity is None or not callable(
+        getattr(runner, "run", None)
+    ):
+        raise TypeError("subprocess runner must expose identity, capabilities, and run")
+    normalized_runner_capabilities = normalize_isolation_capabilities(runner_capabilities)
+    if not isinstance(runner_identity, str) or not runner_identity.strip():
+        raise ValueError("subprocess runner backend identity must be non-empty text")
+
+    selected_context = guard_context
+    if selected_context is None and guard_context_factory is None:
+        selected_context = GuardContext(
+            workspace,
+            configured_limits=EffectiveLimits(
+                max_input_characters=selected_limits.max_argument_bytes,
+                max_output_characters=selected_limits.max_output_characters,
+                max_duration_seconds=selected_limits.max_timeout_seconds,
+                max_argv_items=selected_limits.max_argv_items,
+                max_argv_characters=selected_limits.max_argv_characters,
+            ),
+            available_capabilities=normalized_runner_capabilities,
+            max_governed_calls=max_governed_calls,
+            backend_identity=runner_identity,
+        )
+
+    return ActionTool(
+        _command_tool_definition(),
+        lambda arguments, context: _prepare_command(
+            arguments,
+            context,
+            workspace=workspace,
+            limits=selected_limits,
+            executable_entries=entries,
+            executable_resolver=executable_resolver,
+            allow_shell=allow_shell,
+            required_capabilities=selected_capabilities,
+            environment=trusted_environment,
+            secret_values=secrets,
+        ),
+        lambda action, context: _execute_command(
+            action,
+            context,
+            workspace=workspace,
+            allow_shell=allow_shell,
+            environment=trusted_environment,
+            limits=selected_limits,
+            runner=runner,
+        ),
+        guard_context=selected_context,
+        guard_context_factory=guard_context_factory,
+        policy=policy or DefaultActionPolicy(),
+        approval_provider=approval_provider,
+        pre_hooks=tuple(pre_hooks),
+        post_hooks=tuple(post_hooks),
+        secret_values=secrets,
+        output_sanitizer=_command_output_sanitizer(secrets),
+        max_argument_bytes=selected_limits.max_argument_bytes,
+    )
+
+
 create_workspace_read_action_tool = create_workspace_read_tool
 create_workspace_search_action_tool = create_workspace_search_tool
 create_workspace_patch_action_tool = create_workspace_patch_tool
+create_workspace_command_action_tool = create_workspace_command_tool
 
 
 def create_coding_tools(
@@ -3053,18 +3746,53 @@ def create_coding_tool_registry(
     post_hooks: Sequence[PostActionHook] = (),
     secret_values: Iterable[str] = (),
     max_governed_calls: int = 1,
+    command_limits: CommandToolLimits | None = None,
+    executable_allowlist: Mapping[str, str | Path | CommandExecutable] | None = None,
+    executable_resolver: Callable[[str], CommandExecutable | Path | str | None] | None = None,
+    environment_allowlist: Mapping[str, str] | Iterable[str] = (),
+    environment_source: Mapping[str, str] | None = None,
+    environment: Mapping[str, str] | Iterable[str] | None = None,
+    env: Mapping[str, str] | Iterable[str] | None = None,
+    secret_names: Iterable[str] = (),
+    shell_executables: Iterable[str] = (),
+    allow_shell: bool = False,
+    required_capabilities: Iterable[IsolationCapability] = (),
+    subprocess_runner: SubprocessRunner | None = None,
 ) -> ToolRegistry:
-    return ToolRegistry(
-        create_coding_tools(
-            workspace,
-            limits=limits,
-            guard_context=guard_context,
-            guard_context_factory=guard_context_factory,
-            policy=policy,
-            approval_provider=approval_provider,
-            pre_hooks=pre_hooks,
-            post_hooks=post_hooks,
-            secret_values=secret_values,
-            max_governed_calls=max_governed_calls,
-        )
+    secrets = tuple(secret_values)
+    tools = create_coding_tools(
+        workspace,
+        limits=limits,
+        guard_context=guard_context,
+        guard_context_factory=guard_context_factory,
+        policy=policy,
+        approval_provider=approval_provider,
+        pre_hooks=pre_hooks,
+        post_hooks=post_hooks,
+        secret_values=secrets,
+        max_governed_calls=max_governed_calls,
     )
+    command_tool = create_workspace_command_tool(
+        workspace,
+        limits=command_limits,
+        executable_allowlist=executable_allowlist,
+        executable_resolver=executable_resolver,
+        environment_allowlist=environment_allowlist,
+        environment_source=environment_source,
+        environment=environment,
+        env=env,
+        secret_names=secret_names,
+        secret_values=secrets,
+        shell_executables=shell_executables,
+        allow_shell=allow_shell,
+        required_capabilities=required_capabilities,
+        subprocess_runner=subprocess_runner,
+        guard_context=None,
+        guard_context_factory=None,
+        policy=policy,
+        approval_provider=approval_provider,
+        pre_hooks=pre_hooks,
+        post_hooks=post_hooks,
+        max_governed_calls=max_governed_calls,
+    )
+    return ToolRegistry((*tools, command_tool))

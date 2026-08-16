@@ -1081,7 +1081,11 @@ class Workspace:
     ) -> ResolvedWorkspacePath:
         """Resolve the trusted root for snapshot and observation adapters."""
 
-        if purpose not in {WorkspacePurpose.SNAPSHOT, WorkspacePurpose.SEARCH}:
+        if purpose not in {
+            WorkspacePurpose.SNAPSHOT,
+            WorkspacePurpose.SEARCH,
+            WorkspacePurpose.COMMAND_CWD,
+        }:
             raise WorkspacePathError(
                 reason_code=WorkspaceReason.TARGET_KIND,
                 purpose=purpose,
