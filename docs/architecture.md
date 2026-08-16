@@ -2,13 +2,14 @@
 
 ## Status
 
-This document describes the implemented Phase 8 T5-T13 architecture and the Phase 9 T1-T5
+This document describes the implemented Phase 8 T5-T13 architecture and the Phase 9 T1-T8
 foundations. Memory management is available as a model-free explicit application service,
 request-time policy-filtered recall, an optional durable session read stage, a bounded context
 projection, a pure source-to-transient-candidate extraction boundary, and independent memory/session
 CLI composition. Phase 9 currently has workspace authority/observation, prepared-action governance,
-exact foreground approval, synchronous hook contracts, and a governed execution/runtime bridge;
-coding adapters and subprocess backends remain later checkpoints.
+exact foreground approval, synchronous hook contracts, a governed execution/runtime bridge, bounded
+workspace read/search/patch tools, and local bounded subprocess contracts; command adapters,
+validators, and the foreground coding application remain later checkpoints.
 The roadmap remains the source of truth for deferred capabilities.
 
 ## System Context
@@ -684,8 +685,9 @@ WorkspaceDiff -> immutable WorkspaceSnapshot + bounded unified projection
   `max_governed_calls` ceiling and fails closed before policy.
 - T3's default policy returns `allow` for read/search and `require_approval` for patch/command;
   hard-guard failure is always `deny`. `ActionRecord` stores bounded sanitized governance evidence,
-  but T3 does not request approval, run hooks, call an executor, start a process, define subprocess
-  request/results, or reserve validator capacity. A canonical digest proves action identity only.
+  but T3 does not request approval, run hooks, call an executor, or start a process. T8 separately
+  defines bounded subprocess request/results and the local backend; a canonical T3 digest still
+  proves action identity only.
 - Phase 9 T4 projects approval requests and decisions through bounded immutable sanitized records.
   Approval is one foreground response bound to run/workspace/action/preconditions/capabilities;
   rejection, unavailable input, malformed data, identity mismatch, and drift fail closed, while
@@ -705,6 +707,11 @@ WorkspaceDiff -> immutable WorkspaceSnapshot + bounded unified projection
   runtime. Direct governed registry dispatch must receive that run's explicit
   `ToolExecutionContext`; omission fails closed instead of creating a per-call collector. This
   collector is not a public journal and provides no persistence, replay, or recovery.
+- Phase 9 T8 provides a direct-argv `SubprocessRunner` contract with canonical cwd, a frozen
+  allowlisted environment, no stdin, wall/output ceilings, concurrent bounded stream draining,
+  decode/truncation evidence, and direct-child termination/reaping. The local backend declares no
+  process-group or descendant cleanup and no host filesystem, network, credential, syscall, or
+  workspace-only isolation; T9 owns command/validator composition.
 
 ## Configuration
 
