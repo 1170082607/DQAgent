@@ -161,14 +161,21 @@ def _normalize_skill_keys(
     if isinstance(values, (str, bytes)):
         raise TypeError("skill keys must be an iterable of strings")
     try:
-        raw_values = tuple(values)
+        iterator = iter(values)
     except TypeError as error:
         raise TypeError("skill keys must be an iterable of strings") from error
-    if len(raw_values) > maximum:
-        raise ValueError("skill keys exceed their bound")
+
     normalized: list[str] = []
     seen: set[str] = set()
-    for value in raw_values:
+    for index in range(maximum + 1):
+        try:
+            value = next(iterator)
+        except StopIteration:
+            break
+        except TypeError as error:
+            raise TypeError("skill keys must be an iterable of strings") from error
+        if index >= maximum:
+            raise ValueError("skill keys exceed their bound")
         if not isinstance(value, str) or not value.strip() or "\x00" in value:
             raise ValueError("skill keys must contain non-empty NUL-free strings")
         if value not in seen:

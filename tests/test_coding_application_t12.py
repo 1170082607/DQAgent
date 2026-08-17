@@ -106,6 +106,78 @@ def test_coding_request_rejects_unbounded_or_malformed_input(
         request_factory()
 
 
+def test_coding_request_skill_keys_are_bounded_before_materialization() -> None:
+    consumed = 0
+    maximum = coding_module._MAX_REQUEST_SKILLS
+
+    def skill_keys():
+        nonlocal consumed
+        for index in range(10_000):
+            consumed += 1
+            yield f"skill-{index}"
+
+    with pytest.raises(ValueError, match="skill keys exceed their bound"):
+        CodingRequest("inspect", ("target.txt",), skill_keys())
+
+    assert consumed == maximum + 1
+
+
+def test_coding_request_skill_key_sentinel_stops_at_the_bound() -> None:
+    consumed = 0
+    maximum = coding_module._MAX_REQUEST_SKILLS
+
+    def skill_keys():
+        nonlocal consumed
+        while True:
+            consumed += 1
+            if consumed > maximum + 1:
+                raise AssertionError("skill-key sentinel was consumed past the bound")
+            yield f"skill-{consumed}"
+
+    with pytest.raises(ValueError, match="skill keys exceed their bound"):
+        CodingRequest("inspect", ("target.txt",), skill_keys())
+
+    assert consumed == maximum + 1
+
+
+def test_coding_request_skill_key_iterator_errors_remain_typed() -> None:
+    class NotIterable:
+        pass
+
+    class BrokenIterator:
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            raise TypeError("broken skill-key iterator")
+
+    with pytest.raises(TypeError, match="skill keys must be an iterable"):
+        CodingRequest("inspect", ("target.txt",), NotIterable())  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="skill keys must be an iterable"):
+        CodingRequest("inspect", ("target.txt",), BrokenIterator())  # type: ignore[arg-type]
+
+
+def test_skill_key_bound_failure_does_not_enter_application_or_model(
+    tmp_path: Path,
+) -> None:
+    consumed = 0
+    maximum = coding_module._MAX_REQUEST_SKILLS
+    llm = StubLLM([])
+    app = create_coding_agent_application(make_workspace(tmp_path), llm)
+
+    def skill_keys():
+        nonlocal consumed
+        for index in range(10_000):
+            consumed += 1
+            yield f"skill-{index}"
+
+    with pytest.raises(ValueError, match="skill keys exceed their bound"):
+        app.run(CodingRequest("inspect", ("target.txt",), skill_keys()))
+
+    assert consumed == maximum + 1
+    assert llm.requests == []
+
+
 def test_coding_composition_rejects_unbounded_retained_evidence(tmp_path: Path) -> None:
     workspace = make_workspace(tmp_path)
     with pytest.raises(ValueError, match="evidence bound"):
