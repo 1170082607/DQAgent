@@ -726,6 +726,15 @@ WorkspaceDiff -> immutable WorkspaceSnapshot + bounded unified projection
   Missing parents, path ambiguity, containment/link denial, unreadable files, and invalid UTF-8 fail
   context preparation. The loader does not scan the repository, infer paths from prose, or project
   mutable guidance into host policy.
+- Phase 9 T11 extends that context boundary with a bounded catalog from trusted workspace or
+  read-only skill roots. Catalog entries expose only stable key/name/description metadata; duplicate
+  active keys fail configuration, and at most one complete `SKILL.md` body is loaded for an explicit
+  unambiguous caller key. Missing, invalid, and oversized catalog/body inputs retain typed,
+  content-free omission or failure evidence. `ContextBuilder` projects instructions, catalog, and
+  selected body as separately budgeted lower-authority user data, counts their wrappers in the
+  active budget, and never reloads files during a run. The projection is not host knowledge,
+  transcript, summary, retrieval, or memory state; references, assets, scripts, semantic selection,
+  and plugin discovery remain out of scope.
 
 ## Configuration
 
@@ -777,6 +786,10 @@ the runtime's model-attempt budget and defaults to three. All values are validat
 - Repository-context tests assert explicit target resolution, existing/create ancestor chains,
   deterministic hierarchy ordering, shared-file deduplication, atomic individual/aggregate budget
   omissions, invalid/denied/escaping resources, hostile-content authority, and content-free evidence.
+- Phase 9 T11 tests assert bounded skill catalog metadata, explicit single-body selection, duplicate
+  and unknown-key configuration behavior, typed missing/invalid/oversized outcomes, provenance,
+  lower-authority delimiters, independent/total context budgets, atomic omission, same-run source
+  freezing, and exclusion from durable context projections.
 - Governance tests assert golden canonicalization/digest sensitivity, immutable contracts, fixed
   guard ordering, hard-guard non-overridability, tri-state policy outcomes, fail-closed dependency
   behavior, unified call-capacity checks without reservation, executor non-invocation, and sanitized
