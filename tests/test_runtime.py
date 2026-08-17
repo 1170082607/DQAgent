@@ -20,6 +20,7 @@ from dqagent.models import (
     Role,
     ToolCall,
     ToolDefinition,
+    ToolErrorCode,
     ToolResult,
 )
 from dqagent.runtime import (
@@ -29,7 +30,16 @@ from dqagent.runtime import (
     RunEventType,
     RunState,
 )
-from dqagent.tools import Tool, ToolRegistry
+from dqagent.tool_governance import GuardContext
+from dqagent.tools import (
+    ActionPreparationError,
+    ActionTool,
+    Tool,
+    ToolExecution,
+    ToolExecutionContext,
+    ToolRegistry,
+)
+from dqagent.workspace import Workspace, WorkspaceScope
 
 
 class ScriptedLLM:
@@ -260,6 +270,82 @@ def test_runtime_keeps_tool_diagnostics_out_of_model_observation() -> None:
     )
     assert tool_event.attributes["error_type"] == "RuntimeError"
     assert "db.internal" in str(tool_event.attributes["error_message"])
+
+
+def test_runtime_sanitizes_governed_preparation_diagnostics(tmp_path) -> None:
+    workspace = Workspace(WorkspaceScope("runtime-f001", tmp_path))
+    root = str(workspace.root)
+    secret = "INT_SECRET_T5_PROBE"
+    attempts = 0
+
+    def prepare(arguments, context):
+        del arguments, context
+        raise ActionPreparationError(
+            ToolErrorCode.CONTAINMENT_DENIED,
+            f"raw-root={root} raw-secret={secret}",
+        )
+
+    def execute(action, context):
+        del action, context
+        nonlocal attempts
+        attempts += 1
+        return "must not execute"
+
+    tool = ActionTool(
+        ToolDefinition(
+            "workspace_read",
+            "Execute one governed action.",
+            {"type": "object", "additionalProperties": False},
+        ),
+        prepare,
+        execute,
+        guard_context=GuardContext(workspace),
+        secret_values=(secret,),
+    )
+
+    class RecordingToolRegistry(ToolRegistry):
+        def __init__(self) -> None:
+            super().__init__((tool,))
+            self.executions: list[ToolExecution] = []
+
+        def execute_detailed(
+            self,
+            call: ToolCall,
+            context: RunContext,
+            *,
+            execution_context: ToolExecutionContext | None = None,
+        ) -> ToolExecution:
+            execution = super().execute_detailed(
+                call,
+                context,
+                execution_context=execution_context,
+            )
+            self.executions.append(execution)
+            return execution
+
+    call = ToolCall("call-1", "workspace_read", "{}")
+    llm = ScriptedLLM([Completion(tool_calls=(call,)), Completion("Done")])
+    registry = RecordingToolRegistry()
+    runtime = AgentRuntime(llm, registry)
+
+    result = runtime.run([Message(Role.USER, "Read the workspace")])
+
+    observation = llm.requests[1][0][-1]
+    assert isinstance(observation, ToolResult)
+    assert observation.output == "governed action preparation failed"
+    assert attempts == 0
+
+    tool_event = next(
+        event for event in result.events if event.type is RunEventType.TOOL_CALL_COMPLETED
+    )
+    assert tool_event.attributes["error_type"] == "ActionPreparationError"
+    assert tool_event.attributes["error_message"] == "governed action preparation failed"
+    assert root not in repr(result.events)
+    assert secret not in repr(result.events)
+    assert len(registry.executions) == 1
+    assert registry.executions[0].action_record is None
+    assert root not in repr(registry.executions)
+    assert secret not in repr(registry.executions)
 
 
 def test_event_sink_failure_does_not_change_run_result() -> None:

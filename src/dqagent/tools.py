@@ -700,7 +700,7 @@ class ActionTool:
                     error.code,
                     "governed action preparation failed",
                     error_type=type(error).__name__,
-                    error_message=str(error),
+                    error_message="governed action preparation failed",
                 )
             except Exception as error:
                 self._emit(context, RunEventType.ACTION_OBSERVED, reason="preparation_failed")
