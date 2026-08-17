@@ -15,6 +15,7 @@ import pytest
 from dqagent import coding as coding_module
 from dqagent import coding_cli
 from dqagent.coding import (
+    CodingAgentApplication,
     CodingFailureEvidence,
     CodingRequest,
     ForegroundApprovalProvider,
@@ -157,6 +158,67 @@ def test_coding_request_skill_key_iterator_errors_remain_typed() -> None:
         CodingRequest("inspect", ("target.txt",), BrokenIterator())  # type: ignore[arg-type]
 
 
+def test_coding_request_target_paths_are_bounded_before_materialization(
+    tmp_path: Path,
+) -> None:
+    consumed = 0
+    maximum = coding_module._MAX_REQUEST_TARGETS
+    llm = StubLLM([])
+    app = create_coding_agent_application(make_workspace(tmp_path), llm)
+
+    def target_paths():
+        nonlocal consumed
+        for index in range(10_000):
+            consumed += 1
+            yield f"target-{index}.txt"
+
+    with pytest.raises(ValueError, match="coding target paths exceeds its bound"):
+        app.run(CodingRequest("inspect", target_paths()))
+
+    assert consumed == maximum + 1
+    assert llm.requests == []
+
+
+def test_coding_request_target_path_sentinel_stops_at_the_bound() -> None:
+    maximum = coding_module._MAX_REQUEST_TARGETS
+
+    class NonTerminatingTargets:
+        def __init__(self) -> None:
+            self.consumed = 0
+
+        def __iter__(self) -> Iterator[str]:
+            return self
+
+        def __next__(self) -> str:
+            self.consumed += 1
+            if self.consumed > maximum + 1:
+                raise AssertionError("target sentinel was consumed past the bound")
+            return f"target-{self.consumed}.txt"
+
+    targets = NonTerminatingTargets()
+    with pytest.raises(ValueError, match="coding target paths exceeds its bound"):
+        CodingRequest("inspect", targets)
+
+    assert targets.consumed == maximum + 1
+
+
+def test_coding_request_target_iterator_errors_remain_typed() -> None:
+    class NotIterable:
+        pass
+
+    class BrokenIterator:
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            raise TypeError("broken target iterator")
+
+    with pytest.raises(TypeError, match="coding target paths must be an iterable"):
+        CodingRequest("inspect", NotIterable())  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="coding target paths must be an iterable"):
+        CodingRequest("inspect", BrokenIterator())  # type: ignore[arg-type]
+
+
 def test_skill_key_bound_failure_does_not_enter_application_or_model(
     tmp_path: Path,
 ) -> None:
@@ -195,6 +257,154 @@ def test_coding_composition_rejects_unbounded_retained_evidence(tmp_path: Path) 
                 for index in range(129)
             ),
         )
+
+
+def test_coding_composition_bounds_validator_consumption_before_materialization(
+    tmp_path: Path,
+) -> None:
+    consumed = 0
+    maximum = coding_module._MAX_EVIDENCE_VALIDATORS
+    validator = pass_validator()
+    llm = StubLLM([])
+
+    def validators():
+        nonlocal consumed
+        for _ in range(10_000):
+            consumed += 1
+            yield validator
+
+    with pytest.raises(ValueError, match="coding validators exceed the bounded evidence limit"):
+        create_coding_agent_application(
+            make_workspace(tmp_path),
+            llm,
+            validators=validators(),
+        )
+
+    assert consumed == maximum + 1
+    assert llm.requests == []
+
+
+def test_coding_composition_validator_sentinel_stops_at_the_bound(
+    tmp_path: Path,
+) -> None:
+    maximum = coding_module._MAX_EVIDENCE_VALIDATORS
+    validator = pass_validator()
+
+    class NonTerminatingValidators:
+        def __init__(self) -> None:
+            self.consumed = 0
+
+        def __iter__(self) -> Iterator[ValidatorDefinition]:
+            return self
+
+        def __next__(self) -> ValidatorDefinition:
+            self.consumed += 1
+            if self.consumed > maximum + 1:
+                raise AssertionError("validator sentinel was consumed past the bound")
+            return validator
+
+    validators = NonTerminatingValidators()
+    with pytest.raises(ValueError, match="coding validators exceed the bounded evidence limit"):
+        create_coding_agent_application(
+            make_workspace(tmp_path),
+            StubLLM([]),
+            validators=validators,
+        )
+
+    assert validators.consumed == maximum + 1
+
+
+def test_coding_composition_bounds_limitation_consumption_before_materialization(
+    tmp_path: Path,
+) -> None:
+    consumed = 0
+    maximum = coding_module._MAX_EVIDENCE_LIMITATIONS
+
+    class RuntimeStub:
+        def execute(self, *args: object, **kwargs: object) -> object:
+            del args, kwargs
+            raise AssertionError("runtime must not execute during construction")
+
+    def limitations():
+        nonlocal consumed
+        for index in range(10_000):
+            consumed += 1
+            yield f"limitation-{index}"
+
+    with pytest.raises(ValueError, match="observation limitations are unbounded"):
+        CodingAgentApplication(
+            RuntimeStub(),
+            make_workspace(tmp_path),
+            observation_limitations=limitations(),
+        )
+
+    assert consumed == maximum + 1
+
+
+def test_coding_composition_limitation_sentinel_stops_at_the_bound(
+    tmp_path: Path,
+) -> None:
+    maximum = coding_module._MAX_EVIDENCE_LIMITATIONS
+
+    class RuntimeStub:
+        def execute(self, *args: object, **kwargs: object) -> object:
+            del args, kwargs
+            raise AssertionError("runtime must not execute during construction")
+
+    class NonTerminatingLimitations:
+        def __init__(self) -> None:
+            self.consumed = 0
+
+        def __iter__(self) -> Iterator[str]:
+            return self
+
+        def __next__(self) -> str:
+            self.consumed += 1
+            if self.consumed > maximum + 1:
+                raise AssertionError("limitation sentinel was consumed past the bound")
+            return f"limitation-{self.consumed}"
+
+    limitations = NonTerminatingLimitations()
+    with pytest.raises(ValueError, match="observation limitations are unbounded"):
+        CodingAgentApplication(
+            RuntimeStub(),
+            make_workspace(tmp_path),
+            observation_limitations=limitations,
+        )
+
+    assert limitations.consumed == maximum + 1
+
+
+def test_coding_composition_iterator_errors_remain_typed(tmp_path: Path) -> None:
+    class RuntimeStub:
+        def execute(self, *args: object, **kwargs: object) -> object:
+            del args, kwargs
+            raise AssertionError("runtime must not execute during construction")
+
+    class NotIterable:
+        pass
+
+    class BrokenIterator:
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            raise TypeError("broken composition iterator")
+
+    for values in (NotIterable(), BrokenIterator()):
+        with pytest.raises(TypeError, match="coding validators must be an iterable"):
+            CodingAgentApplication(  # type: ignore[arg-type]
+                RuntimeStub(),
+                make_workspace(tmp_path),
+                validators=values,
+            )
+    for values in (NotIterable(), BrokenIterator()):
+        with pytest.raises(TypeError, match="observation limitations must be an iterable"):
+            CodingAgentApplication(  # type: ignore[arg-type]
+                RuntimeStub(),
+                make_workspace(tmp_path),
+                observation_limitations=values,
+            )
 
 
 def test_failure_evidence_rejects_unbounded_or_unsafe_limitations() -> None:

@@ -125,16 +125,21 @@ def _normalize_targets(
     if isinstance(values, (str, bytes)):
         raise TypeError(f"{label} must be an iterable of paths")
     try:
-        raw_values = tuple(values)
+        iterator = iter(values)
     except TypeError as error:
         raise TypeError(f"{label} must be an iterable of paths") from error
-    if not raw_values:
-        raise ValueError(f"{label} must contain at least one path")
-    if len(raw_values) > maximum:
-        raise ValueError(f"{label} exceeds its bound")
+
     normalized: list[str | PurePosixPath] = []
     seen: set[str] = set()
-    for value in raw_values:
+    for index in range(maximum + 1):
+        try:
+            value = next(iterator)
+        except StopIteration:
+            break
+        except TypeError as error:
+            raise TypeError(f"{label} must be an iterable of paths") from error
+        if index >= maximum:
+            raise ValueError(f"{label} exceeds its bound")
         if isinstance(value, PurePosixPath):
             if not str(value) or "\x00" in str(value):
                 raise ValueError(f"{label} contains an invalid path")
@@ -184,6 +189,36 @@ def _normalize_skill_keys(
     return tuple(normalized)
 
 
+def _normalize_validators(
+    values: Iterable[ValidatorDefinition],
+) -> tuple[ValidatorDefinition, ...]:
+    if isinstance(values, (str, bytes)):
+        raise TypeError("coding validators must be an iterable of ValidatorDefinition values")
+    try:
+        iterator = iter(values)
+    except TypeError as error:
+        raise TypeError(
+            "coding validators must be an iterable of ValidatorDefinition values"
+        ) from error
+
+    normalized: list[ValidatorDefinition] = []
+    for index in range(_MAX_EVIDENCE_VALIDATORS + 1):
+        try:
+            value = next(iterator)
+        except StopIteration:
+            break
+        except TypeError as error:
+            raise TypeError(
+                "coding validators must be an iterable of ValidatorDefinition values"
+            ) from error
+        if not isinstance(value, ValidatorDefinition):
+            raise TypeError("coding validators must contain ValidatorDefinition values")
+        if index >= _MAX_EVIDENCE_VALIDATORS:
+            raise ValueError("coding validators exceed the bounded evidence limit")
+        normalized.append(value)
+    return tuple(normalized)
+
+
 def _normalize_secret_values(values: Iterable[str]) -> tuple[str, ...]:
     if isinstance(values, (str, bytes)):
         raise TypeError("secret values must be an iterable of strings")
@@ -229,28 +264,44 @@ def _normalize_secret_names(values: Iterable[str]) -> tuple[str, ...]:
         build_minimal_environment({}, secret_names=normalized)
 
 
-def _validate_limitation_values(values: object, label: str) -> None:
-    if not isinstance(values, tuple) or len(values) > _MAX_EVIDENCE_LIMITATIONS:
-        raise ValueError(f"{label} are unbounded")
-    if any(
+def _validate_limitation_value(value: object, label: str) -> str:
+    if (
         not isinstance(value, str)
         or not value
         or len(value) > _MAX_EVIDENCE_LIMITATION_CHARACTERS
         or any(ord(character) < 32 and character not in "\t\n" for character in value)
-        for value in values
     ):
         raise ValueError(f"{label} are malformed")
+    return value
+
+
+def _validate_limitation_values(values: object, label: str) -> None:
+    if not isinstance(values, tuple) or len(values) > _MAX_EVIDENCE_LIMITATIONS:
+        raise ValueError(f"{label} are unbounded")
+    for value in values:
+        _validate_limitation_value(value, label)
 
 
 def _normalize_limitations(values: Iterable[str]) -> tuple[str, ...]:
     if isinstance(values, (str, bytes)):
         raise TypeError("observation limitations must be an iterable of strings")
     try:
-        normalized = tuple(values)
+        iterator = iter(values)
     except TypeError as error:
         raise TypeError("observation limitations must be an iterable of strings") from error
-    _validate_limitation_values(normalized, "observation limitations")
-    return normalized
+
+    normalized: list[str] = []
+    for index in range(_MAX_EVIDENCE_LIMITATIONS + 1):
+        try:
+            value = next(iterator)
+        except StopIteration:
+            break
+        except TypeError as error:
+            raise TypeError("observation limitations must be an iterable of strings") from error
+        if index >= _MAX_EVIDENCE_LIMITATIONS:
+            raise ValueError("observation limitations are unbounded")
+        normalized.append(_validate_limitation_value(value, "observation limitations"))
+    return tuple(normalized)
 
 
 @dataclass(frozen=True, slots=True)
@@ -613,11 +664,7 @@ class CodingAgentApplication:
             raise TypeError("coding application runtime must provide execute")
         if not isinstance(workspace, Workspace):
             raise TypeError("coding application requires a Workspace")
-        selected_validators = tuple(validators)
-        if any(not isinstance(item, ValidatorDefinition) for item in selected_validators):
-            raise TypeError("coding validators must contain ValidatorDefinition values")
-        if len(selected_validators) > _MAX_EVIDENCE_VALIDATORS:
-            raise ValueError("coding validators exceed the bounded evidence limit")
+        selected_validators = _normalize_validators(validators)
         secrets = _normalize_secret_values(secret_values)
         selected_max_calls = max_governed_calls
         if selected_max_calls is None:
