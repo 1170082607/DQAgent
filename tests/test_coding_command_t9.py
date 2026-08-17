@@ -11,6 +11,7 @@ from dqagent.coding_tools import (
     WORKSPACE_COMMAND_SCHEMA,
     CommandExecutable,
     CommandToolLimits,
+    create_coding_tool_registry,
     create_workspace_command_tool,
 )
 from dqagent.errors import RunCancelledError
@@ -279,6 +280,46 @@ def test_command_result_projects_backend_capabilities(tmp_path: Path) -> None:
         IsolationCapability.DIRECT_ARGV.value,
         IsolationCapability.NO_STDIN.value,
     ]
+
+
+def test_command_secret_values_are_bounded_before_materialization(tmp_path: Path) -> None:
+    consumed = 0
+
+    def secret_values():
+        nonlocal consumed
+        for index in range(10_000):
+            consumed += 1
+            yield f"secret-{index}"
+
+    with pytest.raises(ValueError, match="secret values exceed their item bound"):
+        create_workspace_command_tool(
+            make_workspace(tmp_path),
+            executable_allowlist={"python": Path(sys.executable)},
+            secret_values=secret_values(),
+        )
+
+    assert consumed == 129
+
+
+def test_coding_registry_secret_values_are_bounded_before_materialization(
+    tmp_path: Path,
+) -> None:
+    consumed = 0
+
+    def secret_values():
+        nonlocal consumed
+        for index in range(10_000):
+            consumed += 1
+            yield f"secret-{index}"
+
+    with pytest.raises(ValueError, match="secret values exceed their item bound"):
+        create_coding_tool_registry(
+            make_workspace(tmp_path),
+            executable_allowlist={"python": Path(sys.executable)},
+            secret_values=secret_values(),
+        )
+
+    assert consumed == 129
 
 
 def test_command_cwd_and_timeout_can_only_tighten_trusted_limits(tmp_path: Path) -> None:

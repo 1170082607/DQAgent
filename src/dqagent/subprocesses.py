@@ -39,6 +39,8 @@ __all__ = [
     "build_minimal_environment",
     "construct_minimal_environment",
     "normalize_isolation_capabilities",
+    "normalize_secret_names",
+    "normalize_secret_values",
     "validate_isolation_capabilities",
 ]
 
@@ -218,7 +220,13 @@ def _normalize_names(values: Iterable[str], label: str) -> tuple[str, ...]:
     return tuple(normalized)
 
 
-def _normalize_secret_values(values: Iterable[str]) -> tuple[str, ...]:
+def normalize_secret_names(values: Iterable[str]) -> tuple[str, ...]:
+    """Validate and bound configured secret environment names."""
+
+    return _normalize_names(values, "secret names")
+
+
+def normalize_secret_values(values: Iterable[str]) -> tuple[str, ...]:
     if isinstance(values, (str, bytes)):
         raise TypeError("secret values must be an iterable of strings")
     try:
@@ -265,9 +273,9 @@ def build_minimal_environment(
     """
 
     configured_secret_names = frozenset(
-        name.casefold() for name in _normalize_names(secret_names, "secret names")
+        name.casefold() for name in normalize_secret_names(secret_names)
     )
-    configured_secret_values = _normalize_secret_values(secret_values)
+    configured_secret_values = normalize_secret_values(secret_values)
 
     if isinstance(allowlist, Mapping):
         candidates = allowlist

@@ -836,11 +836,14 @@ class CodingAgentApplication:
                     tool_context=tool_context,
                 )
             except Exception:
+                self._merge_action_record_collection_state(state, tool_context)
                 state.action_records = self._close_records(collector, state)
                 self._attempt_failure_observation(state, scope)
                 raise
+            self._merge_action_record_collection_state(state, tool_context)
             state.action_records = self._close_records(collector, state)
         finally:
+            self._merge_action_record_collection_state(state, tool_context)
             # ``runtime.execute`` receives an external collector, so it does not own or clear
             # it.  The close above is deliberately the only retention boundary for this run.
             if not state.action_records and collector.records:
@@ -968,6 +971,19 @@ class CodingAgentApplication:
                 "action_record_collection_unavailable",
             )
             return ()
+
+    def _merge_action_record_collection_state(
+        self,
+        state: _CodingRunState,
+        tool_context: ToolExecutionContext,
+    ) -> None:
+        if tool_context.action_record_collection_complete:
+            return
+        state.action_record_collection_complete = False
+        state.observation_limitations = _append_limitation(
+            state.observation_limitations,
+            "action_record_collection_unavailable",
+        )
 
     def _attempt_failure_observation(self, state: _CodingRunState, scope: RunScope) -> None:
         try:

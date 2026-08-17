@@ -29,6 +29,7 @@ from dqagent.subprocesses import (
     SubprocessStatus,
     build_minimal_environment,
     normalize_isolation_capabilities,
+    normalize_secret_values,
 )
 from dqagent.tool_governance import (
     ActionExecutionResult,
@@ -3572,7 +3573,7 @@ def create_workspace_command_tool(
 
     if environment is not None and env is not None:
         raise TypeError("provide environment or env, not both")
-    secrets = tuple(secret_values)
+    secrets = normalize_secret_values(secret_values)
     selected_environment: Mapping[str, str] | Iterable[str] = (
         environment
         if environment is not None
@@ -3759,7 +3760,7 @@ def create_coding_tool_registry(
     required_capabilities: Iterable[IsolationCapability] = (),
     subprocess_runner: SubprocessRunner | None = None,
 ) -> ToolRegistry:
-    secrets = tuple(secret_values)
+    secrets = normalize_secret_values(secret_values)
     tools = create_coding_tools(
         workspace,
         limits=limits,

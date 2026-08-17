@@ -321,6 +321,60 @@ def test_action_record_collection_failure_keeps_effect_indeterminate(
     assert not getattr(result, "rollback_claimed", False)
 
 
+def test_action_record_append_failure_keeps_effect_indeterminate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "target.txt"
+    target.write_text("one\n", encoding="utf-8")
+
+    collector_type = coding_module._RunActionRecordCollector
+
+    class FailingCollector(collector_type):
+        def append(self, run_id, record, reservation):
+            del run_id, record, reservation
+            raise RuntimeError("collector retention failed")
+
+    monkeypatch.setattr(coding_module, "_RunActionRecordCollector", FailingCollector)
+    app = create_coding_agent_application(
+        make_workspace(tmp_path),
+        StubLLM(
+            [
+                Completion(
+                    tool_calls=(
+                        ToolCall(
+                            "command-1",
+                            "workspace_command",
+                            json.dumps(
+                                {
+                                    "argv": [
+                                        "python",
+                                        "-c",
+                                        "from pathlib import Path; "
+                                        "Path('target.txt').write_text('two\\n')",
+                                    ]
+                                }
+                            ),
+                        ),
+                    )
+                ),
+                Completion("finished"),
+            ]
+        ),
+        executable_allowlist={"python": Path(sys.executable)},
+        approval_provider=ScriptedApprovalProvider([ApprovalOutcome.APPROVE]),
+        validators=(pass_validator(),),
+    )
+
+    result = app.run(CodingRequest("update the target", ("target.txt",)))
+
+    assert result.diff.changed_paths == (PurePosixPath("target.txt"),)
+    assert result.action_records == ()
+    assert result.verdict is TaskVerdict.INDETERMINATE
+    assert result.validator_results[0].status is ValidatorStatus.PASSED
+    assert "action_record_collection_unavailable" in result.observation_limitations
+
+
 def test_coding_composition_rejects_mismatched_workspace_authorities(tmp_path: Path) -> None:
     workspace_a_root = tmp_path / "workspace-a"
     workspace_b_root = tmp_path / "workspace-b"

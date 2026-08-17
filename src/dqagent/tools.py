@@ -237,6 +237,7 @@ class _ToolRunState:
     collector: _ActionRecordCollector | None
     owns_collector: bool = False
     local_reservations: set[object] = field(default_factory=set)
+    action_record_collection_complete: bool = True
 
 
 class ToolExecutionContext:
@@ -276,6 +277,10 @@ class ToolExecutionContext:
         """Compatibility alias for callers that use the shorter context name."""
 
         return self._run_context
+
+    @property
+    def action_record_collection_complete(self) -> bool:
+        return self._state.action_record_collection_complete
 
     def with_stage_emitter(
         self,
@@ -344,7 +349,11 @@ class ToolExecutionContext:
         collector = self._state.collector
         if collector is None:
             raise _CollectorObservationError("governed call collector is unavailable")
-        collector.append(self._run_context.run_id, record, reservation)
+        try:
+            collector.append(self._run_context.run_id, record, reservation)
+        except Exception:
+            self._state.action_record_collection_complete = False
+            raise
         self._state.local_reservations.discard(reservation)
 
 

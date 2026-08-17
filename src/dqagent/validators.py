@@ -28,6 +28,8 @@ from dqagent.subprocesses import (
     SubprocessStatus,
     build_minimal_environment,
     normalize_isolation_capabilities,
+    normalize_secret_names,
+    normalize_secret_values,
 )
 from dqagent.workspace import Workspace, WorkspaceError, WorkspacePurpose
 
@@ -462,9 +464,10 @@ class ValidatorRunner:
             or max_validators < 1
         ):
             raise ValueError("max_validators must be a positive integer")
-        secrets = tuple(secret_values)
+        secrets = normalize_secret_values(secret_values)
+        names = normalize_secret_names(secret_names)
         self._workspace = workspace
-        self._secret_names = tuple(secret_names)
+        self._secret_names = names
         self._secret_values = secrets
         self._max_validators = max_validators
         self._runner = subprocess_runner or LocalSubprocessRunner(
@@ -503,14 +506,45 @@ class ValidatorRunner:
     ) -> tuple[ValidatorResult, ...]:
         if isinstance(definitions, (str, bytes)):
             raise TypeError("validator definitions must be an iterable")
-        try:
+        collection_status: ValidatorStatus | None = None
+        if isinstance(definitions, Sequence):
+            if len(definitions) > self._max_validators:
+                raise ValueError("validator definitions exceed the configured bound")
             values = tuple(definitions)
-        except TypeError as error:
-            raise TypeError("validator definitions must be an iterable") from error
-        if len(values) > self._max_validators:
-            raise ValueError("validator definitions exceed the configured bound")
+        else:
+            try:
+                iterator = iter(definitions)
+            except TypeError as error:
+                raise TypeError("validator definitions must be an iterable") from error
+            collected: list[ValidatorDefinition] = []
+            for index in range(self._max_validators + 1):
+                if context is not None:
+                    try:
+                        context.check_active()
+                    except RunCancelledError:
+                        collection_status = ValidatorStatus.CANCELLED
+                        break
+                    except RunDeadlineExceededError:
+                        collection_status = ValidatorStatus.TIMED_OUT
+                        break
+                try:
+                    value = next(iterator)
+                except StopIteration:
+                    break
+                except TypeError as error:
+                    raise TypeError("validator definitions must be an iterable") from error
+                if index >= self._max_validators:
+                    raise ValueError("validator definitions exceed the configured bound")
+                if not isinstance(value, ValidatorDefinition):
+                    raise TypeError(
+                        "validator definitions must contain ValidatorDefinition values"
+                    )
+                collected.append(value)
+            values = tuple(collected)
         if any(not isinstance(value, ValidatorDefinition) for value in values):
             raise TypeError("validator definitions must contain ValidatorDefinition values")
+        if collection_status is not None:
+            return self._not_started_results(values, collection_status)
 
         results: list[ValidatorResult] = []
         for index, definition in enumerate(values):

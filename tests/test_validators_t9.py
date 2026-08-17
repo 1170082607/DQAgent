@@ -180,6 +180,62 @@ def test_validator_definition_and_result_bounds_are_enforced(tmp_path: Path) -> 
     assert result.cleanup_succeeded
 
 
+def test_validator_secret_names_are_bounded_before_materialization(
+    tmp_path: Path,
+) -> None:
+    consumed = 0
+
+    def secret_names():
+        nonlocal consumed
+        for index in range(10_000):
+            consumed += 1
+            yield f"SECRET_NAME_{index}"
+
+    with pytest.raises(ValueError, match="secret names exceeds its item bound"):
+        ValidatorRunner(
+            make_workspace(tmp_path),
+            secret_names=secret_names(),
+        )
+
+    assert consumed == 129
+
+
+def test_validator_definition_iterable_is_bounded_before_materialization(
+    tmp_path: Path,
+) -> None:
+    consumed = 0
+
+    def definitions():
+        nonlocal consumed
+        for index in range(10_000):
+            consumed += 1
+            yield ValidatorDefinition(f"validator-{index}", ("validator",))
+
+    with pytest.raises(ValueError, match="validator definitions exceed the configured bound"):
+        ValidatorRunner(make_workspace(tmp_path), max_validators=1).run(definitions())
+
+    assert consumed == 2
+
+
+def test_validator_definition_collection_honors_cancellation(
+    tmp_path: Path,
+) -> None:
+    context = RunContext(run_id="validator-definition-cancel")
+    context.cancel("cancel before collecting validator definitions")
+    consumed = 0
+
+    def definitions():
+        nonlocal consumed
+        for index in range(10_000):
+            consumed += 1
+            yield ValidatorDefinition(f"validator-{index}", ("validator",))
+
+    results = ValidatorRunner(make_workspace(tmp_path)).run(definitions(), context)
+
+    assert results == ()
+    assert consumed == 0
+
+
 def test_validator_definition_rejects_malformed_trusted_inputs() -> None:
     with pytest.raises(ValueError):
         ValidatorDefinition("bad/id", ("validator",))
