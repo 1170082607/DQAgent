@@ -305,6 +305,11 @@ class AgentRuntime:
         """Return the default coordinator used by standalone runtime runs."""
         return self._run_coordinator
 
+    @property
+    def max_governed_calls(self) -> int:
+        """Return the run-wide governed-action retention/admission ceiling."""
+        return self._max_governed_calls
+
     def create_context(
         self,
         *,

@@ -231,17 +231,24 @@ live-model memory-quality evaluation.
 
 ### Phase 9: Coding Agent Harness and Safety
 
-**Status:** Planned
+**Status:** In progress (T1-T12 implemented; T13-T15 planned)
 
 **Outcome:** Validate the accumulated runtime in a realistic, bounded action environment.
 
-- Add workspace-scoped read, search, patch, and command tools with explicit output limits.
-- Introduce policy decisions for allow, deny, and user approval before side-effecting actions.
-- Add pre/post tool hooks without coupling policy extensions to the core loop.
-- Define secret handling, path containment, subprocess limits, and hard isolation boundaries.
-- Load repository instructions and reusable skills on demand through the context layer.
-- Observe changes through diffs and validator results, not only tool return strings.
-- Evaluate bounded coding tasks in disposable fixture repositories.
+- [x] Add workspace-scoped read, search, patch, and command tools with explicit output limits.
+- [x] Introduce policy decisions for allow, deny, and user approval before side-effecting actions.
+- [x] Add pre/post tool hooks without coupling policy extensions to the core loop.
+- [x] Define secret handling, path containment, subprocess limits, and hard isolation boundaries.
+- [x] Load repository instructions and reusable skills on demand through the context layer.
+- [x] Observe changes through diffs and validator results, not only tool return strings.
+- [x] Compose the production `CodingAgentApplication` and foreground `dqagent-code` path with
+      bounded action/context/diff/validator evidence and evidence-derived verdicts.
+- [ ] Evaluate bounded coding tasks in disposable fixture repositories.
+
+T12 is the first complete production application path: `CodingAgentApplication` coordinates one
+foreground run from target validation through final observation and trusted validators, while
+`dqagent-code` exposes the same composition. T13-T15 add the disposable evaluation substrate,
+representative baseline cases, and final audit/closure evidence.
 
 The initial coding agent should be useful with one model loop and a strong harness. Planning and
 multiple agents are added only after evaluation shows where the simpler design fails.

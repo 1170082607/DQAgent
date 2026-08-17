@@ -1582,6 +1582,10 @@ class RepositoryContextLoader:
         )
 
     @property
+    def workspace(self) -> Workspace:
+        return self._instructions.workspace
+
+    @property
     def instructions(self) -> RepositoryInstructionLoader:
         return self._instructions
 

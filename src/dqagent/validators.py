@@ -304,6 +304,7 @@ class ValidatorStatus(StrEnum):
     FAILED = "failed"
     FAIL = "failed"
     UNAVAILABLE = "unavailable"
+    NOT_RUN = "not_run"
     TIMED_OUT = "timed_out"
     TIMEOUT = "timed_out"
     CANCELLED = "cancelled"
@@ -416,6 +417,7 @@ class ValidatorResult:
     def available(self) -> bool:
         return self.status not in {
             ValidatorStatus.UNAVAILABLE,
+            ValidatorStatus.NOT_RUN,
             ValidatorStatus.CAPABILITY_MISSING,
             ValidatorStatus.ERROR,
         }
@@ -477,6 +479,10 @@ class ValidatorRunner:
         self._backend_identity = (
             identity if isinstance(identity, str) and identity.strip() else "unavailable"
         )
+
+    @property
+    def workspace(self) -> Workspace:
+        return self._workspace
 
     @property
     def subprocess_runner(self) -> SubprocessRunner:
@@ -760,6 +766,7 @@ def derive_task_verdict(
             result.status
             in {
                 ValidatorStatus.UNAVAILABLE,
+                ValidatorStatus.NOT_RUN,
                 ValidatorStatus.CAPABILITY_MISSING,
                 ValidatorStatus.TIMED_OUT,
                 ValidatorStatus.CANCELLED,

@@ -2,14 +2,15 @@
 
 ## Status
 
-This document describes the implemented Phase 8 T5-T13 architecture and the Phase 9 T1-T9
+This document describes the implemented Phase 8 T5-T13 architecture and the Phase 9 T1-T12
 foundations. Memory management is available as a model-free explicit application service,
 request-time policy-filtered recall, an optional durable session read stage, a bounded context
 projection, a pure source-to-transient-candidate extraction boundary, and independent memory/session
 CLI composition. Phase 9 currently has workspace authority/observation, prepared-action governance,
 exact foreground approval, synchronous hook contracts, a governed execution/runtime bridge, bounded
-workspace read/search/patch tools, local bounded subprocess contracts, and governed command/validator
-composition; the foreground coding application remains a later checkpoint.
+workspace read/search/patch tools, local bounded subprocess contracts, governed command/validator
+composition, and the `CodingAgentApplication`/`dqagent-code` foreground path. Disposable coding
+evaluation and final Phase 9 audit remain later checkpoints.
 The roadmap remains the source of truth for deferred capabilities.
 
 ## System Context
@@ -151,6 +152,32 @@ transactional CAS with a bounded busy timeout, not a distributed lease. A sessio
 do model/tool work from a stale session revision and lose the final session CAS; the completed run
 and any external tool effects are not rolled back. Distributed tenancy, leases, and exactly-once
 side effects remain outside this architecture.
+
+## Phase 9 Coding Run
+
+The coding application is a coordinator above the existing runtime. It deliberately does not compose
+sessions, retrieval, memory, workflows, background workers, or a second model loop:
+
+```text
+dqagent-code / caller
+    -> CodingRequest (message, explicit targets, skill keys)
+    -> validate targets
+    -> WorkspaceObserver baseline
+    -> RepositoryContextLoader -> ContextBuilder
+    -> one AgentRuntime loop -> allowlisted governed coding tools
+    -> WorkspaceObserver final snapshot + WorkspaceDiff
+    -> trusted sequential ValidatorRunner
+    -> CodingRunResult (actions, context, diff, validators, verdict, blind spots)
+```
+
+The result verdict is evidence-derived in fixed priority order: any definitive validator failure is
+`failed`; incomplete required observation, unknown effects, unavailable/timeout/not-run validators
+are `indeterminate`; no validators is `not_validated`; otherwise all configured validators passing
+is `passed`. A passed result does not claim that secret/protected paths or backend-unisolated host
+effects were unchanged. Those limitations remain visible in `blind_spots` and
+`observation_limitations`. Failure exceptions keep their original DQAgent/control category and may
+carry bounded records and final observation evidence; timeout, cancellation, and failure never imply
+rollback.
 
 ## Responsibility Boundaries
 
@@ -617,6 +644,7 @@ source linkage, not semantic entailment.
 
 ```text
 CLI -> AgentApplication -> RunCoordinator + AgentRuntime
+CLI -> CodingAgentApplication -> RunCoordinator + WorkspaceObserver + RepositoryContextLoader + ContextBuilder + AgentRuntime + ValidatorRunner
 CLI -> SessionAgentApplication -> RunCoordinator + Retriever + MemoryService + ContextBuilder + SessionStore + AgentRuntime
 RunCoordinator -> RunContext + RunEventEmitter + EventSink
 AgentRuntime -> RunScope + LLMClient + ToolRegistry + neutral models
@@ -735,6 +763,12 @@ WorkspaceDiff -> immutable WorkspaceSnapshot + bounded unified projection
   active budget, and never reloads files during a run. The projection is not host knowledge,
   transcript, summary, retrieval, or memory state; references, assets, scripts, semantic selection,
   and plugin discovery remain out of scope.
+- Phase 9 T12 composes `CodingAgentApplication` above one existing `AgentRuntime` loop. It validates
+  explicit targets, captures baseline/final snapshots, loads one request-scoped repository context,
+  retains bounded ordered action records, runs validators only after final observation, and derives
+  the verdict from validator/observation evidence. `dqagent-code` uses the same application and fails
+  closed for approval in non-interactive mode; request data cannot select policy, secrets, executable
+  allowlists, validators, or isolation capabilities.
 
 ## Configuration
 
@@ -790,6 +824,10 @@ the runtime's model-attempt budget and defaults to three. All values are validat
   and unknown-key configuration behavior, typed missing/invalid/oversized outcomes, provenance,
   lower-authority delimiters, independent/total context budgets, atomic omission, same-run source
   freezing, and exclusion from durable context projections.
+- Phase 9 T12 tests assert full success, empty-validator `not_validated`, validator fail/unavailable/
+  not-run verdicts, final observation on runtime failure, cancellation/deadline control categories,
+  exact approval and non-interactive denial, CLI exit/output safety, run serialization, and stage
+  event order.
 - Governance tests assert golden canonicalization/digest sensitivity, immutable contracts, fixed
   guard ordering, hard-guard non-overridability, tri-state policy outcomes, fail-closed dependency
   behavior, unified call-capacity checks without reservation, executor non-invocation, and sanitized
@@ -809,6 +847,9 @@ nondeterminism make it an unsuitable correctness gate.
 - The runtime is synchronous; cancellation cannot preempt a blocking SDK call or Python thread.
 - `AgentApplication` conversation state is not safe for concurrent callers.
 - Agent-requested tool calls are sequential and tool retries are intentionally unsupported.
+- The coding application serializes one workspace in-process only. Its local subprocess backend does
+  not isolate host filesystem, network, credentials, system calls, or descendant processes; Phase 9
+  T13-T15 disposable evaluation and final audit are still pending.
 - Event sinks are best-effort and no concrete durable telemetry adapter is included.
 - The legacy `AgentApplication` remains process-local and unbounded; durable behavior requires an
   explicit `SessionAgentApplication` or CLI `--session-id`.

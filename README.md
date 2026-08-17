@@ -4,11 +4,12 @@ DQAgent is an engineering-first learning project for building AI Agent capabilit
 from foundational components. Its purpose is to understand the design of production-oriented agent
 systems instead of treating frameworks as black boxes.
 
-**Status:** Pre-alpha. Phase 8 T13 closure is complete: T5-T12 are implemented and evaluated, and
-the final audit findings are closed. DQAgent supports durable bounded sessions, explicit local RAG,
-optional exact-scope read-only memory recall, and explicit source-to-transient-candidate extraction
-with provider-neutral boundaries, citation/memory provenance, and deterministic regression
-evaluations. Phase 8 is complete within its documented v1 scope.
+**Status:** Pre-alpha. Phase 8 is complete within its documented v1 scope, and Phase 9 T12 now
+provides the first complete bounded coding path. DQAgent supports durable bounded sessions, explicit
+local RAG, optional exact-scope read-only memory recall, explicit source-to-transient-candidate
+extraction, and the `CodingAgentApplication`/`dqagent-code` foreground CLI with provider-neutral
+boundaries, governed workspace actions, bounded diffs, trusted validators, and deterministic
+regression tests. Phase 9 T13-T15 evaluation and final audit work remain planned.
 
 ## Goals
 
@@ -38,6 +39,10 @@ evaluations. Phase 8 is complete within its documented v1 scope.
 - JSON Schema tool definitions and an explicit tool registry.
 - Explicit governed action tools with bounded raw arguments, fixed authorization ordering,
   at-most-once execution, sanitized stage events, and private bounded action-record retention.
+- A production `CodingAgentApplication` that coordinates target validation, baseline/context
+  preparation, one governed `AgentRuntime` loop, final diff observation, and trusted validators.
+- A foreground `dqagent-code` CLI with explicit workspace/message/targets/skills, exact approval
+  summaries, bounded diff and validator output, evidence-derived verdicts, and blind-spot display.
 - A bounded model/tool/observation loop with repeated-call protection.
 - Structured recovery observations for invalid arguments, unknown tools, timeouts, and tool errors.
 - Built-in `current_time` and deterministic `get_weather` demonstration tools.
@@ -169,6 +174,22 @@ endpoint. OpenAI continues to use the Responses API; both remain behind the same
 boundary. The compatibility reference is the
 [llama.cpp server documentation](https://github.com/ggml-org/llama.cpp/tree/6ba5ef247034cd57201360aed246d98f5a404d92/tools/server)
 resolved on 2026-07-28.
+
+## Foreground Coding
+
+`dqagent-code` runs one bounded coding request against an explicit workspace and target path. It
+uses the configured provider, loads applicable `AGENTS.md` guidance and explicitly selected skill
+keys, then uses only the composed governed workspace tools. Side-effecting patch and command actions
+require exact foreground approval; a non-interactive invocation rejects them without reading stdin.
+
+```bash
+dqagent-code --workspace . --message "Update the parser" --target src/dqagent/parser.py \
+  --validator tests='["python","-m","pytest","tests/test_parser.py"]'
+```
+
+The command exits `0` only for a `passed` verdict. `not_validated`, `failed`, and `indeterminate`
+return a nonzero exit. A successful run still displays protected/secret observation blind spots and
+the local subprocess backend's limits; local execution is not a host or workspace sandbox.
 
 ## Usage
 
@@ -332,6 +353,8 @@ src/dqagent/events.py Shared agent/workflow lifecycle events
 src/dqagent/evaluation.py Behavioral case loader, runner, checks, and reports
 src/dqagent/context.py Prompt assembly, knowledge loading, budgets, and compaction
 src/dqagent/repository_context.py Contained instructions, skill catalog/body loading, and provenance
+src/dqagent/coding.py Production coding application and bounded run evidence
+src/dqagent/coding_cli.py Foreground `dqagent-code` composition and output boundary
 src/dqagent/session.py Durable transcript model and session stores
 src/dqagent/context_evaluation.py Deterministic context regression runner
 src/dqagent/retrieval.py Ingestion, embedding, local index, retrieval, and provenance
