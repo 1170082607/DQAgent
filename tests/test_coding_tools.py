@@ -12,6 +12,7 @@ from dqagent.coding_tools import (
     WORKSPACE_READ_SCHEMA,
     WORKSPACE_SEARCH_SCHEMA,
     CodingToolLimits,
+    create_coding_tools,
     create_workspace_read_tool,
     create_workspace_search_tool,
 )
@@ -104,6 +105,24 @@ def test_unknown_arguments_are_rejected_before_governance(tmp_path: Path) -> Non
     assert execution.result.outcome is ToolOutcome.ERROR
     assert execution.result.error_code is ToolErrorCode.INVALID_ARGUMENTS
     assert records == ()
+
+
+def test_coding_tool_factory_secret_values_are_bounded(tmp_path: Path) -> None:
+    consumed = 0
+
+    def secret_values():
+        nonlocal consumed
+        for index in range(10_000):
+            consumed += 1
+            yield f"secret-{index}"
+
+    with pytest.raises(ValueError, match="secret values exceed"):
+        create_coding_tools(
+            make_workspace(tmp_path),
+            secret_values=secret_values(),
+        )
+
+    assert consumed == 65
 
 
 def test_read_supports_bom_one_based_numbered_unicode_lines(tmp_path: Path) -> None:

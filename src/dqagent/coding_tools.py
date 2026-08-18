@@ -113,6 +113,9 @@ _DEFAULT_MAX_QUERY_CHARACTERS: Final[int] = 4_096
 _DEFAULT_MAX_GLOB_CHARACTERS: Final[int] = 512
 _DEFAULT_MAX_PATCH_CONTENT_BYTES: Final[int] = 1_000_000
 _DEFAULT_MAX_PATCH_REPLACEMENTS: Final[int] = 64
+_MAX_CODING_SECRET_VALUES: Final[int] = 64
+_MAX_EXECUTABLE_ALIASES: Final[int] = 64
+_MAX_SHELL_EXECUTABLES: Final[int] = 32
 _DEFAULT_MAX_PATCH_REPLACEMENT_CHARACTERS: Final[int] = 64_000
 _DEFAULT_MAX_PATCH_ELAPSED_SECONDS: Final[float] = 5.0
 _DEFAULT_MAX_PATCH_OUTPUT_CHARACTERS: Final[int] = 4_096
@@ -806,9 +809,26 @@ def _normalize_executable_allowlist(
         return ()
     if not isinstance(allowlist, Mapping):
         raise TypeError("executable allowlist must be a mapping")
+    if len(allowlist) > _MAX_EXECUTABLE_ALIASES:
+        raise ValueError("executable allowlist exceeds its item bound")
     if isinstance(shell_executables, (str, bytes)):
         raise TypeError("shell executables must be an iterable of names")
-    shell_names = tuple(shell_executables)
+    try:
+        shell_iterator = iter(shell_executables)
+    except TypeError as error:
+        raise TypeError("shell executables must be an iterable of names") from error
+    shell_names_list: list[str] = []
+    for index in range(_MAX_SHELL_EXECUTABLES + 1):
+        try:
+            name = next(shell_iterator)
+        except StopIteration:
+            break
+        except Exception as error:
+            raise TypeError("shell executables must be an iterable of names") from error
+        if index >= _MAX_SHELL_EXECUTABLES:
+            raise ValueError("shell executables exceed their item bound")
+        shell_names_list.append(name)
+    shell_names = tuple(shell_names_list)
     if any(not isinstance(name, str) or not name.strip() for name in shell_names):
         raise ValueError("shell executable identities must be non-empty text")
     entries: list[tuple[str, CommandExecutable]] = []
@@ -3348,7 +3368,10 @@ def create_workspace_read_tool(
     max_governed_calls: int = 1,
 ) -> ActionTool:
     selected_limits = limits or DEFAULT_CODING_TOOL_LIMITS
-    secrets = tuple(secret_values)
+    secrets = normalize_secret_values(
+        secret_values,
+        max_items=_MAX_CODING_SECRET_VALUES,
+    )
     _validate_coding_secret_values(secrets)
     selected_context = guard_context
     if selected_context is None and guard_context_factory is None:
@@ -3400,7 +3423,10 @@ def create_workspace_search_tool(
     max_governed_calls: int = 1,
 ) -> ActionTool:
     selected_limits = limits or DEFAULT_CODING_TOOL_LIMITS
-    secrets = tuple(secret_values)
+    secrets = normalize_secret_values(
+        secret_values,
+        max_items=_MAX_CODING_SECRET_VALUES,
+    )
     _validate_coding_secret_values(secrets)
     selected_context = guard_context
     if selected_context is None and guard_context_factory is None:
@@ -3452,7 +3478,10 @@ def create_workspace_patch_tool(
     max_governed_calls: int = 1,
 ) -> ActionTool:
     selected_limits = limits or DEFAULT_CODING_TOOL_LIMITS
-    secrets = tuple(secret_values)
+    secrets = normalize_secret_values(
+        secret_values,
+        max_items=_MAX_CODING_SECRET_VALUES,
+    )
     _validate_coding_secret_values(secrets)
     selected_context = guard_context
     if selected_context is None and guard_context_factory is None:
@@ -3589,8 +3618,9 @@ def create_workspace_command_tool(
         secret_values=secrets,
     )
     _validate_coding_secret_values(secrets)
-    selected_capabilities = normalize_isolation_capabilities(
-        (*_COMMAND_REQUIRED_CAPABILITIES, *tuple(required_capabilities))
+    selected_capabilities = (
+        _COMMAND_REQUIRED_CAPABILITIES
+        | normalize_isolation_capabilities(required_capabilities)
     )
     runner = subprocess_runner
     if runner is None:
@@ -3678,7 +3708,10 @@ def create_coding_tools(
     max_governed_calls: int = 1,
 ) -> tuple[ActionTool, ActionTool, ActionTool]:
     selected_limits = limits or DEFAULT_CODING_TOOL_LIMITS
-    secrets = tuple(secret_values)
+    secrets = normalize_secret_values(
+        secret_values,
+        max_items=_MAX_CODING_SECRET_VALUES,
+    )
     selected_context = guard_context
     if selected_context is None and guard_context_factory is None:
         selected_context = _default_guard_context(

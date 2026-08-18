@@ -20,7 +20,7 @@ from dataclasses import InitVar, dataclass, field, replace
 from enum import StrEnum
 from pathlib import PurePosixPath
 from types import MappingProxyType
-from typing import Final, Protocol, TypeAlias, cast
+from typing import Final, Protocol, TypeAlias, TypeVar, cast
 
 from dqagent.errors import RunCancelledError, RunDeadlineExceededError
 from dqagent.execution import RunContext
@@ -107,6 +107,11 @@ _DEFAULT_OUTPUT_CHARACTERS = 32_000
 _DEFAULT_DURATION_SECONDS = 30.0
 _DEFAULT_ARGV_ITEMS = 128
 _DEFAULT_ARGV_CHARACTERS = 32_000
+_MAX_PREPARED_TARGETS = 128
+_MAX_PREPARED_ENVIRONMENT_IDENTITIES = 128
+_MAX_PREPARED_SECRET_VALUES = 128
+_MAX_PREPARED_SECRET_CHARACTERS = 32_000
+_MAX_PRECONDITIONS = 32
 _LIMIT_FIELDS: Final[tuple[str, ...]] = (
     "max_input_characters",
     "max_output_characters",
@@ -139,6 +144,7 @@ _ABSOLUTE_PATH_PATTERN = re.compile(
     r"(?<![A-Za-z0-9:])(?:[A-Za-z]:[\\/]|\\\\)(?:[^\\/\s]+[\\/])*[^\\/\s]*"
     r"|(?<![A-Za-z0-9:])/(?:[^/\s]+/)*[^/\s]+"
 )
+_BoundedValue = TypeVar("_BoundedValue")
 
 
 CanonicalJsonValue: TypeAlias = (
@@ -302,18 +308,55 @@ def _normalize_secret_values(values: Iterable[str]) -> tuple[str, ...]:
     if isinstance(values, (str, bytes)):
         raise TypeError("secret values must be an iterable of strings")
     try:
-        candidates = tuple(values)
+        iterator = iter(values)
     except TypeError as error:
         raise TypeError("secret values must be an iterable of strings") from error
-    normalized = tuple(
-        _validate_text(
+    normalized: list[str] = []
+    total_characters = 0
+    for index in range(_MAX_PREPARED_SECRET_VALUES + 1):
+        try:
+            value = next(iterator)
+        except StopIteration:
+            break
+        except Exception as error:
+            raise TypeError("secret values must be an iterable of strings") from error
+        if index >= _MAX_PREPARED_SECRET_VALUES:
+            raise ValueError("secret values exceed their item bound")
+        normalized_value = _validate_text(
             f"secret value {index}",
             value,
             maximum=_MAX_DISPLAY_CHARACTERS,
         )
-        for index, value in enumerate(candidates)
-    )
+        total_characters += len(normalized_value)
+        if total_characters > _MAX_PREPARED_SECRET_CHARACTERS:
+            raise ValueError("secret values exceed their character bound")
+        normalized.append(normalized_value)
     return tuple(sorted(set(normalized), key=lambda value: (-len(value), value)))
+
+
+def _bounded_tuple(
+    values: Iterable[_BoundedValue],
+    label: str,
+    maximum: int,
+) -> tuple[_BoundedValue, ...]:
+    if isinstance(values, (str, bytes)):
+        raise TypeError(f"{label} must be an iterable")
+    try:
+        iterator = iter(values)
+    except TypeError as error:
+        raise TypeError(f"{label} must be an iterable") from error
+    result: list[_BoundedValue] = []
+    for index in range(maximum + 1):
+        try:
+            value = next(iterator)
+        except StopIteration:
+            break
+        except Exception as error:
+            raise TypeError(f"{label} must be an iterable") from error
+        if index >= maximum:
+            raise ValueError(f"{label} exceeds its item bound")
+        result.append(value)
+    return tuple(result)
 
 
 def _contains_absolute_path(value: str) -> bool:
@@ -463,10 +506,7 @@ class EffectPreconditions:
     def __post_init__(self) -> None:
         if isinstance(self.items, (str, bytes)):
             raise TypeError("effect preconditions must be EffectPrecondition values")
-        try:
-            values = tuple(self.items)
-        except TypeError as error:
-            raise TypeError("effect preconditions must be iterable") from error
+        values = _bounded_tuple(self.items, "effect preconditions", _MAX_PRECONDITIONS)
         if any(not isinstance(item, EffectPrecondition) for item in values):
             raise TypeError("effect preconditions must contain EffectPrecondition values")
         if len({item.logical_path for item in values}) != len(values):
@@ -546,6 +586,8 @@ class PreparedAction:
         if self.effect_kind is not expected_effect:
             raise ValueError("action kind and effect kind are inconsistent")
         _validate_identity("workspace ID", self.workspace_id)
+        if not isinstance(self.limits, EffectiveLimits):
+            raise TypeError("action limits must be EffectiveLimits")
         normalized_secret_values = _normalize_secret_values(secret_values)
         _validate_effect_identity_text(
             "workspace ID",
@@ -556,12 +598,14 @@ class PreparedAction:
 
         if isinstance(self.logical_targets, (str, bytes)):
             raise TypeError("logical targets must be an iterable of logical paths")
-        try:
-            targets = tuple(
-                _normalize_logical_path(item, "logical target") for item in self.logical_targets
+        targets = tuple(
+            _normalize_logical_path(item, "logical target")
+            for item in _bounded_tuple(
+                self.logical_targets,
+                "logical targets",
+                _MAX_PREPARED_TARGETS,
             )
-        except TypeError as error:
-            raise TypeError("logical targets must be an iterable of logical paths") from error
+        )
         if (
             self.action_kind in {ActionKind.READ, ActionKind.SEARCH, ActionKind.PATCH}
             and not targets
@@ -576,16 +620,19 @@ class PreparedAction:
 
         if isinstance(self.argv, (str, bytes)):
             raise TypeError("argv must be an iterable of argument strings")
-        try:
-            arguments = tuple(self.argv)
-        except TypeError as error:
-            raise TypeError("argv must be an iterable of argument strings") from error
+        arguments = _bounded_tuple(
+            self.argv,
+            "argv",
+            self.limits.max_argv_items,
+        )
         if any(not isinstance(argument, str) for argument in arguments):
             raise TypeError("argv must contain only strings")
         if self.action_kind is ActionKind.COMMAND and not arguments:
             raise ValueError("command actions require a direct argv")
         if arguments and not arguments[0]:
             raise ValueError("argv executable must not be empty")
+        if sum(len(argument) for argument in arguments) > self.limits.max_argv_characters:
+            raise ValueError("argv exceeds its character bound")
         for index, argument in enumerate(arguments):
             _validate_effect_identity_text(
                 f"argv[{index}]",
@@ -607,10 +654,11 @@ class PreparedAction:
             )
         if isinstance(self.environment_identity, (str, bytes)):
             raise TypeError("environment identity must contain variable names")
-        try:
-            environment = tuple(self.environment_identity)
-        except TypeError as error:
-            raise TypeError("environment identity must contain variable names") from error
+        environment = _bounded_tuple(
+            self.environment_identity,
+            "environment identity",
+            _MAX_PREPARED_ENVIRONMENT_IDENTITIES,
+        )
         for name in environment:
             if not isinstance(name, str) or not name or "=" in name or "\x00" in name:
                 raise ValueError("environment identity must contain names, not values")
@@ -645,8 +693,6 @@ class PreparedAction:
             "required_capabilities",
             normalize_isolation_capabilities(self.required_capabilities),
         )
-        if not isinstance(self.limits, EffectiveLimits):
-            raise TypeError("action limits must be EffectiveLimits")
         if not isinstance(self.display_text, str):
             raise TypeError("display text must be text")
         if len(self.display_text) > _MAX_DISPLAY_CHARACTERS or "\x00" in self.display_text:

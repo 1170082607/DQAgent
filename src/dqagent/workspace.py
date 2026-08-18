@@ -19,6 +19,7 @@ from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
+from itertools import chain
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Final, cast
@@ -88,6 +89,12 @@ _DEFAULT_MAX_SNAPSHOT_FILE_BYTES: Final[int] = 1_000_000
 _DEFAULT_MAX_SNAPSHOT_ELAPSED_SECONDS: Final[float] = 10.0
 _DEFAULT_MAX_RENDERED_DIFF_CHARACTERS: Final[int] = 200_000
 _WORKSPACE_ROOT_PATH: Final[PurePosixPath] = PurePosixPath(".")
+_MAX_RULE_ITEMS: Final[int] = 128
+_MAX_RULE_CHARACTERS: Final[int] = 32_000
+_MAX_SANITIZER_ITEMS: Final[int] = 128
+_MAX_SANITIZER_CHARACTERS: Final[int] = 32_000
+_MAX_SANITIZER_HOST_PATH_ITEMS: Final[int] = 32
+_MAX_SANITIZER_HOST_PATH_CHARACTERS: Final[int] = 16_384
 
 
 class WorkspacePurpose(StrEnum):
@@ -791,8 +798,9 @@ class WorkspaceScope:
         protected = _unique_rules((*DEFAULT_PROTECTED_PATHS, *protected))
         secret = _normalize_rules(self.secret_paths, "secret_paths")
         volatile = _unique_rules(
-            _normalize_rules(
-                (*self.volatile_paths, *self.volatile_exclusions), "volatile_paths"
+            (
+                *_normalize_rules(self.volatile_paths, "volatile_paths"),
+                *_normalize_rules(self.volatile_exclusions, "volatile_exclusions"),
             )
         )
         ignored = _unique_rules(_normalize_rules(self.ignored_paths, "ignored_paths"))
@@ -1027,7 +1035,7 @@ class Workspace:
 
         return Sanitizer(
             secrets=secrets,
-            host_paths=(self._scope.root, *tuple(host_paths)),
+            host_paths=chain((self._scope.root,), host_paths),
         )
 
     def sanitize(
@@ -3112,8 +3120,23 @@ def _validate_positive_float(name: str, value: object) -> None:
 def _normalize_rules(
     values: Iterable[PurePosixPath], label: str
 ) -> tuple[PurePosixPath, ...]:
+    try:
+        iterator = iter(values)
+    except TypeError as error:
+        raise WorkspaceConfigurationError(reason_code=WorkspaceReason.INVALID_RULE) from error
     normalized: list[PurePosixPath] = []
-    for value in values:
+    total_characters = 0
+    for index in range(_MAX_RULE_ITEMS + 1):
+        try:
+            value = next(iterator)
+        except StopIteration:
+            break
+        except Exception as error:
+            raise WorkspaceConfigurationError(
+                reason_code=WorkspaceReason.INVALID_RULE
+            ) from error
+        if index >= _MAX_RULE_ITEMS:
+            raise WorkspaceConfigurationError(reason_code=WorkspaceReason.INVALID_RULE)
         if not isinstance(value, PurePosixPath):
             raise WorkspaceConfigurationError(reason_code=WorkspaceReason.INVALID_RULE)
         raw = str(value)
@@ -3122,6 +3145,9 @@ def _normalize_rules(
         if any(part in {"", ".", ".."} for part in raw.split("/")):
             raise WorkspaceConfigurationError(reason_code=WorkspaceReason.INVALID_RULE)
         if len(raw) > 4_096:
+            raise WorkspaceConfigurationError(reason_code=WorkspaceReason.INVALID_RULE)
+        total_characters += len(raw)
+        if total_characters > _MAX_RULE_CHARACTERS:
             raise WorkspaceConfigurationError(reason_code=WorkspaceReason.INVALID_RULE)
         normalized.append(PurePosixPath(*raw.split("/")))
     return tuple(normalized)
@@ -3201,18 +3227,47 @@ def _same_authority(left: _PathSignature, right: _PathSignature) -> bool:
 
 
 def _normalize_literals(values: Iterable[str], label: str) -> tuple[str, ...]:
+    try:
+        iterator = iter(values)
+    except TypeError as error:
+        raise TypeError(f"{label} must be an iterable of strings") from error
     normalized: list[str] = []
-    for value in values:
+    total_characters = 0
+    for index in range(_MAX_SANITIZER_ITEMS + 1):
+        try:
+            value = next(iterator)
+        except StopIteration:
+            break
+        except Exception as error:
+            raise TypeError(f"{label} must be an iterable of strings") from error
+        if index >= _MAX_SANITIZER_ITEMS:
+            raise ValueError(f"{label} exceeds its item bound")
         if not isinstance(value, str):
             raise TypeError(f"{label} must contain text")
         if value:
+            total_characters += len(value)
+            if total_characters > _MAX_SANITIZER_CHARACTERS:
+                raise ValueError(f"{label} exceeds its character bound")
             normalized.append(value)
     return tuple(sorted(set(normalized), key=lambda item: (-len(item), item)))
 
 
 def _normalize_host_paths(values: Iterable[Path | str]) -> tuple[str, ...]:
+    try:
+        iterator = iter(values)
+    except TypeError as error:
+        raise TypeError("host_paths must be an iterable") from error
     candidates: set[str] = set()
-    for value in values:
+    total_characters = 0
+    for index in range(_MAX_SANITIZER_HOST_PATH_ITEMS + 1):
+        try:
+            value = next(iterator)
+        except StopIteration:
+            break
+        except Exception as error:
+            raise TypeError("host_paths must be an iterable") from error
+        if index >= _MAX_SANITIZER_HOST_PATH_ITEMS:
+            raise ValueError("host_paths exceed their item bound")
         if isinstance(value, Path):
             rendered = str(value)
         elif isinstance(value, str):
@@ -3221,6 +3276,9 @@ def _normalize_host_paths(values: Iterable[Path | str]) -> tuple[str, ...]:
             raise TypeError("host_paths must contain Path or text values")
         if not rendered:
             continue
+        total_characters += len(rendered)
+        if total_characters > _MAX_SANITIZER_HOST_PATH_CHARACTERS:
+            raise ValueError("host_paths exceed their character bound")
         candidates.add(rendered)
         candidates.add(rendered.replace("\\", "/"))
         candidates.add(rendered.replace("/", "\\"))

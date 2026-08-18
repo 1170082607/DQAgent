@@ -101,6 +101,20 @@ memory remain lower-authority data and cannot select or authorize a skill-driven
 - A general plugin runtime, semantic skill retrieval, background indexing, and remote skill
   distribution remain outside Phase 9.
 
+## Implementation Evidence
+
+`src/dqagent/repository_context.py` implements contained target-aware `AGENTS.md` hierarchy
+loading, bounded skill catalog discovery, explicit single-body selection, provenance, omission
+evidence, and source revalidation. `src/dqagent/context.py` projects these immutable resources
+as lower-authority request-scoped user data; `src/dqagent/coding.py` loads one projection before
+the single `AgentRuntime` loop and does not reload it during that run.
+
+Evidence includes `tests/test_repository_context.py`,
+`tests/test_repository_context_skills.py`, `tests/test_coding_application_t12.py`, the T14
+hostile-guidance/skill case, and the current Phase 9 deterministic evaluation. The projection
+remains a model-facing authority convention, not a hard prompt-injection sandbox; resources do
+not become policy, approval, validator, transcript, retrieval, or memory state.
+
 ## Alternatives Considered
 
 ### Render repository instructions as existing system knowledge

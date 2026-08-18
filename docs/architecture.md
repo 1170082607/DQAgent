@@ -2,7 +2,7 @@
 
 ## Status
 
-This document describes the implemented Phase 8 T5-T13 architecture and the Phase 9 T1-T14
+This document describes the implemented Phase 8 T5-T13 architecture and the completed Phase 9 T1-T15
 foundations. Memory management is available as a model-free explicit application service,
 request-time policy-filtered recall, an optional durable session read stage, a bounded context
 projection, a pure source-to-transient-candidate extraction boundary, and independent memory/session
@@ -10,8 +10,8 @@ CLI composition. Phase 9 currently has workspace authority/observation, prepared
 exact foreground approval, synchronous hook contracts, a governed execution/runtime bridge, bounded
 workspace read/search/patch tools, local bounded subprocess contracts, governed command/validator
 composition, the `CodingAgentApplication`/`dqagent-code` foreground path, and a disposable coding
-evaluation substrate, and the representative coding baseline. The final Phase 9 audit remains a
-later checkpoint.
+evaluation substrate, the representative coding baseline, and the bounded Phase 9 closure evidence.
+The local subprocess isolation ceiling and live-model quality limitations remain explicit.
 The roadmap remains the source of truth for deferred capabilities.
 
 ## System Context
@@ -884,8 +884,8 @@ nondeterminism make it an unsuitable correctness gate.
 - Agent-requested tool calls are sequential and tool retries are intentionally unsupported.
 - The coding application serializes one workspace in-process only. Its local subprocess backend does
   not isolate host filesystem, network, credentials, system calls, or descendant processes; Phase 9
-  T14 representative coding cases are covered by the credential-free baseline; T15 final audit
-  remains pending.
+  T14 representative coding cases are covered by the credential-free baseline and T15 closure
+  evidence; Phase 13 remains the owner of stronger isolation.
 - Event sinks are best-effort and no concrete durable telemetry adapter is included.
 - The legacy `AgentApplication` remains process-local and unbounded; durable behavior requires an
   explicit `SessionAgentApplication` or CLI `--session-id`.

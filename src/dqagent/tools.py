@@ -6,11 +6,11 @@ import json
 import logging
 import math
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass, field, replace
-from typing import Protocol
+from typing import Protocol, TypeVar
 
 from jsonschema import Draft202012Validator, FormatChecker
 from jsonschema.exceptions import SchemaError, ValidationError
@@ -19,6 +19,7 @@ from dqagent.errors import RunCancelledError, RunDeadlineExceededError
 from dqagent.events import RunEventType
 from dqagent.execution import RunContext
 from dqagent.models import ToolCall, ToolDefinition, ToolErrorCode, ToolOutcome, ToolResult
+from dqagent.subprocesses import normalize_secret_values
 from dqagent.tool_governance import (
     HARD_GUARD_ORDER,
     ActionExecutionResult,
@@ -53,6 +54,7 @@ from dqagent.tool_governance import (
 logger = logging.getLogger(__name__)
 
 DEFAULT_GOVERNED_ARGUMENT_BYTES = 64_000
+_MAX_ACTION_HOOKS = 32
 PHASE9_RESERVED_TOOL_NAMES = frozenset(
     {
         "workspace_read",
@@ -61,6 +63,32 @@ PHASE9_RESERVED_TOOL_NAMES = frozenset(
         "workspace_command",
     }
 )
+_BoundedToolValue = TypeVar("_BoundedToolValue")
+
+
+def _bounded_tool_tuple(
+    values: Iterable[_BoundedToolValue],
+    label: str,
+    maximum: int,
+) -> tuple[_BoundedToolValue, ...]:
+    if isinstance(values, (str, bytes)):
+        raise TypeError(f"{label} must be an iterable")
+    try:
+        iterator = iter(values)
+    except TypeError as error:
+        raise TypeError(f"{label} must be an iterable") from error
+    normalized: list[_BoundedToolValue] = []
+    for index in range(maximum + 1):
+        try:
+            value = next(iterator)
+        except StopIteration:
+            break
+        except Exception as error:
+            raise TypeError(f"{label} must be an iterable") from error
+        if index >= maximum:
+            raise ValueError(f"{label} exceeds its item bound")
+        normalized.append(value)
+    return tuple(normalized)
 
 
 class ToolHandler(Protocol):
@@ -612,13 +640,19 @@ class ActionTool:
             or self.max_argument_bytes < 1
         ):
             raise ValueError("action argument byte limit must be a positive integer")
-        object.__setattr__(self, "pre_hooks", tuple(self.pre_hooks))
-        object.__setattr__(self, "post_hooks", tuple(self.post_hooks))
+        object.__setattr__(
+            self,
+            "pre_hooks",
+            _bounded_tool_tuple(self.pre_hooks, "pre-hooks", _MAX_ACTION_HOOKS),
+        )
+        object.__setattr__(
+            self,
+            "post_hooks",
+            _bounded_tool_tuple(self.post_hooks, "post-hooks", _MAX_ACTION_HOOKS),
+        )
         if isinstance(self.secret_values, (str, bytes)):
             raise TypeError("action secret values must be an iterable of strings")
-        secrets = tuple(self.secret_values)
-        if len(secrets) > 64 or any(not isinstance(value, str) or not value for value in secrets):
-            raise ValueError("action secret values are malformed or exceed the bound")
+        secrets = normalize_secret_values(self.secret_values, max_items=64)
         object.__setattr__(self, "secret_values", secrets)
 
     def execute_detailed(

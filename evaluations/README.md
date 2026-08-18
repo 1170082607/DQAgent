@@ -171,6 +171,10 @@ representative suite. It records 10/10 passed cases and the structural determini
 The fingerprint excludes generated IDs, report timestamps, output text, and check detail strings;
 observed timing and limit detail are not golden values.
 
+The T14 finding set and Phase 9 T15 audit are closed within the bounded v1 scope. This baseline
+remains controlled fixture regression evidence and is not production isolation or live-model quality
+evidence.
+
 Each case declares the request, explicit targets and skills, repository fixture, trusted composition
 fixture, expected/forbidden diff, validator outcomes, governance trajectory, content-free context
 evidence, event subsequence, and required limits. The loader verifies a SHA-256 digest over the

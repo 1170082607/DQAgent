@@ -189,6 +189,36 @@ def test_governed_pipeline_has_fixed_order_and_at_most_once_record(tmp_path) -> 
     assert collector.records == ()
 
 
+@pytest.mark.parametrize("hook_field", ("pre_hooks", "post_hooks"))
+def test_action_tool_hook_iterables_are_bounded(tmp_path, hook_field: str) -> None:
+    workspace = make_workspace(tmp_path)
+    action = make_action(workspace=workspace)
+
+    class InfiniteHooks:
+        def __init__(self) -> None:
+            self.consumed = 0
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            self.consumed += 1
+            return lambda value: HookResult(
+                HookOutcome.SUCCEEDED,
+                "ok",
+                f"hook-{self.consumed}",
+            )
+
+    hooks = InfiniteHooks()
+    kwargs = {"pre_hooks": (), "post_hooks": ()}
+    kwargs[hook_field] = hooks
+
+    with pytest.raises(ValueError, match="hooks exceeds its item bound"):
+        make_tool(workspace, action, lambda value, context: "ok", **kwargs)
+
+    assert hooks.consumed == 33
+
+
 def test_governed_stage_events_are_ordered_and_sanitized(tmp_path) -> None:
     secret = "TOPSECRET"
     workspace = make_workspace(tmp_path, secret_values=(secret,))

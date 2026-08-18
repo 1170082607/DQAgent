@@ -35,6 +35,7 @@ from dqagent.llm import LLMClient
 from dqagent.models import (
     Completion,
     ConversationItem,
+    Message,
     TokenUsage,
     ToolCall,
     ToolDefinition,
@@ -129,6 +130,14 @@ _MAX_SECRET_NAMES_CHARACTERS = 4_096
 _MAX_SECRET_VALUES_CHARACTERS = 16_384
 _MAX_RAW_JSON_ITEMS = _MAX_EXPECTED_CHECKS
 _MAX_RAW_JSON_DEPTH = 16
+_REQUIRED_CODING_TOOL_NAMES = frozenset(
+    {
+        "workspace_read",
+        "workspace_search",
+        "workspace_patch",
+        "workspace_command",
+    }
+)
 
 
 class CodingEvaluationDefinitionError(DQAgentError):
@@ -877,9 +886,19 @@ class CodingEvaluationReport:
 class _ScriptedCodingLLM:
     """Fresh, finite model fixture owned by one case only."""
 
-    def __init__(self, completions: Sequence[Completion]) -> None:
+    def __init__(
+        self,
+        completions: Sequence[Completion],
+        *,
+        user_message: str,
+        context_expectation: CodingEvaluationContextExpectation,
+        require_repository_guidance: bool,
+    ) -> None:
         self._completions = tuple(completions)
         self._index = 0
+        self._user_message = user_message
+        self._context_expectation = context_expectation
+        self._require_repository_guidance = require_repository_guidance
 
     @property
     def consumed_all(self) -> bool:
@@ -896,7 +915,30 @@ class _ScriptedCodingLLM:
         *,
         context: RunContext | None = None,
     ) -> Completion:
-        del messages, tools
+        message_values = tuple(
+            item.content for item in messages if isinstance(item, Message)
+        )
+        if self._user_message not in message_values:
+            raise RuntimeError("coding evaluation active request missing from model context")
+        tool_names = {
+            item.name for item in tools if isinstance(item, ToolDefinition)
+        }
+        if not _REQUIRED_CODING_TOOL_NAMES.issubset(tool_names):
+            raise RuntimeError("coding evaluation tool definitions missing from model context")
+        rendered_context = "\n".join(message_values)
+        if self._require_repository_guidance and "[repository-instruction " not in rendered_context:
+            raise RuntimeError("coding evaluation repository guidance missing from model context")
+        for source in self._context_expectation.selected_instruction_sources:
+            marker = f"source={json.dumps(source, ensure_ascii=True)}"
+            if marker not in rendered_context:
+                raise RuntimeError(
+                    "coding evaluation instruction provenance missing from model context"
+                )
+        selected_skill = self._context_expectation.selected_skill_key
+        if self._context_expectation.selected_skill_body and selected_skill is not None:
+            marker = f"key={json.dumps(selected_skill, ensure_ascii=True)}"
+            if "[skill-body " not in rendered_context or marker not in rendered_context:
+                raise RuntimeError("coding evaluation selected skill missing from model context")
         if context is not None:
             context.check_active()
         if self._index >= len(self._completions):
@@ -1992,7 +2034,12 @@ class CodingEvaluationRunner:
         tool_calls_payload: tuple[Mapping[str, object], ...] = ()
         context_payload: Mapping[str, object] = {}
         observation_limitations: tuple[str, ...] = ()
-        model = _ScriptedCodingLLM(case.fixture.model_completions)
+        model = _ScriptedCodingLLM(
+            case.fixture.model_completions,
+            user_message=case.request.user_message,
+            context_expectation=case.expected.context,
+            require_repository_guidance="AGENTS.md" in case.repository.files,
+        )
         event_collector = _RunEventCollector()
         try:
             repository = _DisposableRepository(case)

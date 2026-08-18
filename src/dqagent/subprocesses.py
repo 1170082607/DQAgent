@@ -68,11 +68,24 @@ def normalize_isolation_capabilities(
     if isinstance(capabilities, (str, bytes)):
         raise TypeError("isolation capabilities must be an iterable of IsolationCapability")
     try:
-        values = tuple(capabilities)
+        iterator = iter(capabilities)
     except TypeError as error:
         raise TypeError(
             "isolation capabilities must be an iterable of IsolationCapability"
         ) from error
+    values: list[IsolationCapability] = []
+    for index in range(len(IsolationCapability) + 1):
+        try:
+            value = next(iterator)
+        except StopIteration:
+            break
+        except Exception as error:
+            raise TypeError(
+                "isolation capabilities must be an iterable of IsolationCapability"
+            ) from error
+        if index >= len(IsolationCapability):
+            raise ValueError("isolation capabilities exceed their item bound")
+        values.append(value)
     if any(not isinstance(value, IsolationCapability) for value in values):
         raise ValueError("isolation capabilities must contain only IsolationCapability values")
     return frozenset(values)
@@ -226,21 +239,29 @@ def normalize_secret_names(values: Iterable[str]) -> tuple[str, ...]:
     return _normalize_names(values, "secret names")
 
 
-def normalize_secret_values(values: Iterable[str]) -> tuple[str, ...]:
+def normalize_secret_values(
+    values: Iterable[str],
+    *,
+    max_items: int = _MAX_ENV_ITEMS,
+) -> tuple[str, ...]:
     if isinstance(values, (str, bytes)):
         raise TypeError("secret values must be an iterable of strings")
+    if isinstance(max_items, bool) or not isinstance(max_items, int) or max_items < 1:
+        raise ValueError("secret value item bound must be a positive integer")
     try:
         iterator = iter(values)
     except TypeError as error:
         raise TypeError("secret values must be an iterable of strings") from error
 
     normalized: list[str] = []
-    for index in range(_MAX_ENV_ITEMS + 1):
+    for index in range(max_items + 1):
         try:
             value = next(iterator)
         except StopIteration:
             break
-        if index >= _MAX_ENV_ITEMS:
+        except Exception as error:
+            raise TypeError("secret values must be an iterable of strings") from error
+        if index >= max_items:
             raise ValueError("secret values exceed their item bound")
         if not isinstance(value, str) or not value:
             raise ValueError("secret values must be non-empty strings")

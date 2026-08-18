@@ -153,6 +153,41 @@ def test_t14_traversal_tool_result_mutations_fail_evaluation() -> None:
         assert result.evaluation_passed is False
 
 
+def test_t14_model_boundary_mutation_fails_evaluation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dqagent import coding_evaluation as coding_evaluation_module
+
+    suite = load_coding_evaluation_suite(SUITE_PATH)
+    case = suite.cases[0]
+    original_complete = coding_evaluation_module._ScriptedCodingLLM.complete
+
+    def drop_model_boundary(
+        model,
+        messages,
+        tools=(),
+        *,
+        context=None,
+    ):
+        return original_complete(model, (), (), context=context)
+
+    monkeypatch.setattr(
+        coding_evaluation_module._ScriptedCodingLLM,
+        "complete",
+        drop_model_boundary,
+    )
+
+    result = CodingEvaluationRunner().run(
+        CodingEvaluationSuite(suite.suite_id, suite.schema_version, (case,))
+    ).results[0]
+
+    assert result.passed is False
+    assert result.evaluation_passed is False
+    assert any(
+        check.name == "run.status" and not check.passed for check in result.checks
+    )
+
+
 def test_t14_case_digest_binds_tool_call_expectations(tmp_path: Path) -> None:
     raw = json.loads(SUITE_PATH.read_text(encoding="utf-8"))
     raw["cases"][2]["expected"]["tool_calls"][0]["error_code"] = "protected_resource_denied"
@@ -297,14 +332,17 @@ def test_t14_documentation_states_lifecycle_and_isolation_ceiling() -> None:
     detailed_design = (root / "docs" / "phase-9-detailed-design.md").read_text(encoding="utf-8")
     roadmap = (root / "docs" / "roadmap.md").read_text(encoding="utf-8")
 
-    assert "T14 remains pending reviewer remediation and fresh closure" in readme
-    assert "T14 implemented, pending review" in roadmap
     assert (
-        "Status: Implemented in current worktree; T14 pending reviewer remediation "
-        "and fresh closure"
-        in detailed_design
+        "Phase 9 is complete within its bounded v1 coding-harness scope"
+        in " ".join(readme.split())
     )
-    assert "Roadmap status: Phase 9 remains `In progress`" in detailed_design
+    assert "T15 final audit/closure evidence are complete" in roadmap
+    normalized_design = " ".join(detailed_design.split())
+    assert (
+        "Status: Complete within the bounded v1 scope; T15 final audit and closure completed"
+        in normalized_design
+    )
+    assert "Roadmap status: Phase 9 `Complete`" in normalized_design
 
     for document in (readme, evaluations_readme, architecture, detailed_design):
         normalized_document = " ".join(document.split())

@@ -180,6 +180,43 @@ def test_validator_definition_and_result_bounds_are_enforced(tmp_path: Path) -> 
     assert result.cleanup_succeeded
 
 
+def test_validator_definition_argv_is_bounded_before_materialization() -> None:
+    consumed = 0
+
+    def argv():
+        nonlocal consumed
+        for index in range(10_000):
+            consumed += 1
+            yield f"argument-{index}"
+
+    with pytest.raises(ValueError, match="validator argv"):
+        ValidatorDefinition("bounded", argv())
+
+    assert consumed == 129
+
+
+@pytest.mark.parametrize("field", ("trusted_ignored_paths", "accepted_exit_codes"))
+def test_validator_definition_collections_are_bounded(field: str) -> None:
+    consumed = 0
+
+    def values():
+        nonlocal consumed
+        for index in range(10_000):
+            consumed += 1
+            yield f"ignored-{index}" if field == "trusted_ignored_paths" else index
+
+    kwargs = {
+        "trusted_ignored_paths": (),
+        "accepted_exit_codes": (0,),
+    }
+    kwargs[field] = values()
+
+    with pytest.raises(ValueError, match="bound|unbounded"):
+        ValidatorDefinition("bounded", ("validator",), **kwargs)
+
+    assert consumed == 33
+
+
 def test_validator_secret_names_are_bounded_before_materialization(
     tmp_path: Path,
 ) -> None:

@@ -23,4 +23,5 @@ to an ADR when it becomes a durable project decision.
 - [Phase 7 Comparison: DQAgent Retrieval, LangChain, and Chroma](phase-7-retrieval-framework-comparison.md)
 - [Phase 8 Comparison: DQAgent, LangGraph Store, and Letta](phase-8-memory-framework-comparison.md)
 - [Phase 9 Comparison: DQAgent Coding Harness and learn-claude-code](phase-9-coding-harness-comparison.md)
+- [Phase 9 Closure Record](phase-9-closure.md)
 - [Phase 8 Closure Record](phase-8-closure.md)

@@ -117,6 +117,21 @@ ceiling without changing ADR-0011's authorization order.
 - Container orchestration, remote workers, tenancy, durable audit, and production secret management
   remain Phase 13 concerns.
 
+## Implementation Evidence
+
+`src/dqagent/workspace.py` owns canonical logical-path authority, protected/secret rules,
+effect-boundary revalidation, bounded observation, blind spots, and sanitization.
+`src/dqagent/subprocesses.py` owns direct argv, contained cwd, allowlisted environment, no stdin,
+bounded streams, timeout/cancellation handling, and direct-child termination/reaping.
+`src/dqagent/coding_tools.py` and `src/dqagent/validators.py` consume the same subprocess
+capability and cleanup evidence.
+
+Evidence includes `tests/test_workspace.py`, `tests/test_subprocesses.py`,
+`tests/test_coding_command_t9.py`, `tests/test_validators_t9.py`, `tests/test_coding_application_t12.py`,
+and the Phase 9 disposable evaluation suite. The local backend continues to declare no host
+filesystem, network, credential, syscall, process-group, descendant-tree, or workspace-only
+isolation; stronger enforcement remains Phase 13 scope.
+
 ## Alternatives Considered
 
 ### Rely only on resolved-path containment

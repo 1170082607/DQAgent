@@ -1,9 +1,9 @@
 # Phase 9 Detailed Design: Coding Agent Harness and Safety
 
-- Status: Implemented in current worktree; T14 pending reviewer remediation and fresh closure
+- Status: Complete within the bounded v1 scope; T15 final audit and closure completed
 - Date: 2026-08-13
 - Revised: 2026-08-18 after T14 implementation and reviewer disposition
-- Roadmap status: Phase 9 remains `In progress`; T15 `Final Audit` and overall closure are pending
+- Roadmap status: Phase 9 `Complete`; deferred production capabilities remain explicitly out of scope
 - Scope: Phase 9 only
 
 ## 1. Purpose and Authority
@@ -744,14 +744,15 @@ Implemented in the current worktree as the 10-case
 `evaluations/cases/phase-9-coding-baseline-v1.json` suite, the committed
 `evaluations/baselines/phase-9-coding-deterministic-v1.json` baseline, the CI
 `dqagent-coding-eval` command, updated architecture/evaluation documentation, and the Phase 9
-source-reading comparison. The T14 checkpoint remains open pending reviewer finding remediation
-and fresh closure. The baseline is credential-free and does not treat timing as golden.
+source-reading comparison. The T14 finding set and T15 final audit are closed within the bounded
+v1 scope. The baseline is credential-free and does not treat timing as golden.
 
 ### T15: Final audit and closure
 
-Run Ruff, strict mypy, full pytest/coverage, all existing deterministic evaluations, Phase 9 suite,
-credential/artifact scan, specialized reviews, and a fresh final audit. Update roadmap/version and
-closure records only after findings are dispositioned and the user accepts closure evidence.
+Completed with current full/static/evaluation gates, credential/artifact scan, T0/T1 current-worktree
+evidence backfill, specialized reviews, final finding disposition/remediation, and fresh final-audit
+closure. The formal Phase 9 closure record is
+`docs/learning/phase-9-closure.md`.
 
 ## 16. Acceptance Criteria
 

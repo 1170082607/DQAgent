@@ -239,6 +239,57 @@ def test_action_replace_requires_secret_validation_context() -> None:
         )
 
 
+@pytest.mark.parametrize("field", ("secret_values", "logical_targets", "argv"))
+def test_prepared_action_public_iterables_are_bounded(field: str) -> None:
+    class InfiniteValues:
+        def __init__(self) -> None:
+            self.consumed = 0
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            self.consumed += 1
+            if field == "secret_values":
+                return f"secret-{self.consumed}"
+            if field == "logical_targets":
+                return PurePosixPath(f"target-{self.consumed}.txt")
+            return f"argv-{self.consumed}"
+
+    values = InfiniteValues()
+    kwargs = {
+        "logical_targets": (PurePosixPath("target.txt"),),
+        "secret_values": (),
+        "argv": (),
+    }
+    kwargs[field] = values
+
+    with pytest.raises(ValueError, match="item bound"):
+        PreparedAction(
+            ActionKind.READ,
+            EffectKind.NONE,
+            WORKSPACE_ID,
+            **kwargs,
+        )
+
+    assert values.consumed == 129
+
+
+def test_effect_preconditions_public_iterable_is_bounded() -> None:
+    consumed = 0
+
+    def preconditions():
+        nonlocal consumed
+        for index in range(10_000):
+            consumed += 1
+            yield EffectPrecondition(PurePosixPath(f"target-{index}.txt"))
+
+    with pytest.raises(ValueError, match="item bound"):
+        EffectPreconditions(preconditions())
+
+    assert consumed == 33
+
+
 def test_digest_changes_for_each_effect_identity_field() -> None:
     read = make_read_action()
     command = make_command_action()

@@ -131,6 +131,21 @@ approval outcomes, limits, and runtime events. It does not implement a second ag
 - Planning, multi-agent coordination, MCP implementation, background approval, and automatic
   mutating-tool retry remain outside Phase 9.
 
+## Implementation Evidence
+
+The Phase 9 implementation supports this decision through
+`src/dqagent/tool_governance.py`, `src/dqagent/tools.py`, `src/dqagent/coding_tools.py`, and
+`src/dqagent/coding.py`. The governed path performs bounded parsing, immutable preparation,
+hard guards, tri-state policy, exact approval, revalidation, ordered hooks, one executor attempt,
+post-effect evidence, and bounded private action-record retention.
+
+Evidence includes `tests/test_tool_governance.py`, `tests/test_tool_governance_t4.py`,
+`tests/test_tool_governance_t5.py`, `tests/test_coding_tools_t7.py`,
+`tests/test_coding_application_t12.py`, and the Phase 9 deterministic coding cases. The current
+full suite and Phase 3/6/7/8/9 deterministic gates pass. The implementation does not add a
+durable action journal, rollback, reusable approval, automatic side-effect retry, or host/process
+isolation.
+
 ## Alternatives Considered
 
 ### Describe safety rules only in the prompt

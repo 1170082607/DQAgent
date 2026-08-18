@@ -56,6 +56,10 @@ _MAX_RESULT_CHARACTERS: Final[int] = 128_000
 _MAX_DIAGNOSTIC_CHARACTERS: Final[int] = 256
 _MAX_DIAGNOSTICS: Final[int] = 8
 _MAX_EXIT_CODES: Final[int] = 32
+_MAX_ENV_ITEMS: Final[int] = 128
+_MAX_ENV_CHARACTERS: Final[int] = 32_000
+_MAX_IGNORED_PATHS: Final[int] = 32
+_MAX_IGNORED_PATH_CHARACTERS: Final[int] = 16_384
 
 
 def _validate_identity(value: object, label: str) -> str:
@@ -77,22 +81,34 @@ def _normalize_argv(argv: Iterable[str]) -> tuple[str, ...]:
     if isinstance(argv, (str, bytes)):
         raise TypeError("validator argv must be an iterable of strings")
     try:
-        values = tuple(argv)
+        iterator = iter(argv)
     except TypeError as error:
         raise TypeError("validator argv must be an iterable of strings") from error
-    if not values or len(values) > _MAX_ARGV_ITEMS:
+    values: list[str] = []
+    total_characters = 0
+    for index in range(_MAX_ARGV_ITEMS + 1):
+        try:
+            value = next(iterator)
+        except StopIteration:
+            break
+        except Exception as error:
+            raise TypeError("validator argv must be an iterable of strings") from error
+        if index >= _MAX_ARGV_ITEMS:
+            raise ValueError("validator argv must be non-empty and bounded")
+        if (
+            not isinstance(value, str)
+            or not value
+            or "\x00" in value
+            or len(value) > _MAX_ARGUMENT_CHARACTERS
+        ):
+            raise ValueError("validator argv arguments must be non-empty NUL-free strings")
+        total_characters += len(value)
+        if total_characters > _MAX_ARGV_CHARACTERS:
+            raise ValueError("validator argv exceeds its character bound")
+        values.append(value)
+    if not values:
         raise ValueError("validator argv must be non-empty and bounded")
-    if any(
-        not isinstance(value, str)
-        or not value
-        or "\x00" in value
-        or len(value) > _MAX_ARGUMENT_CHARACTERS
-        for value in values
-    ):
-        raise ValueError("validator argv arguments must be non-empty NUL-free strings")
-    if sum(len(value) for value in values) > _MAX_ARGV_CHARACTERS:
-        raise ValueError("validator argv exceeds its character bound")
-    return values
+    return tuple(values)
 
 
 def _normalize_cwd(value: str | PurePosixPath) -> PurePosixPath:
@@ -120,8 +136,21 @@ def _normalize_environment(value: Mapping[str, str] | None) -> Mapping[str, str]
         return {}
     if not isinstance(value, Mapping):
         raise TypeError("validator environment must be a mapping")
+    try:
+        iterator = iter(value.items())
+    except Exception as error:
+        raise TypeError("validator environment must be a mapping") from error
     normalized: dict[str, str] = {}
-    for name, item in value.items():
+    characters = 0
+    for index in range(_MAX_ENV_ITEMS + 1):
+        try:
+            name, item = next(iterator)
+        except StopIteration:
+            break
+        except Exception as error:
+            raise TypeError("validator environment must be a mapping") from error
+        if index >= _MAX_ENV_ITEMS:
+            raise ValueError("validator environment exceeds its item bound")
         if (
             not isinstance(name, str)
             or not name
@@ -131,6 +160,9 @@ def _normalize_environment(value: Mapping[str, str] | None) -> Mapping[str, str]
             or "\x00" in item
         ):
             raise ValueError("validator environment must contain NUL-free strings")
+        characters += len(name) + len(item)
+        if characters > _MAX_ENV_CHARACTERS:
+            raise ValueError("validator environment exceeds its character bound")
         normalized[name] = item
     return MappingProxyType(dict(sorted(normalized.items())))
 
@@ -141,8 +173,24 @@ def _normalize_ignored_paths(
     if isinstance(values, (str, bytes)):
         raise TypeError("validator ignored paths must be an iterable")
     normalized: list[PurePosixPath] = []
-    for value in values:
+    try:
+        iterator = iter(values)
+    except TypeError as error:
+        raise TypeError("validator ignored paths must be an iterable") from error
+    characters = 0
+    for index in range(_MAX_IGNORED_PATHS + 1):
+        try:
+            value = next(iterator)
+        except StopIteration:
+            break
+        except Exception as error:
+            raise TypeError("validator ignored paths must be an iterable") from error
+        if index >= _MAX_IGNORED_PATHS:
+            raise ValueError("validator ignored paths exceed their item bound")
         path = _normalize_cwd(value)
+        characters += len(path.as_posix())
+        if characters > _MAX_IGNORED_PATH_CHARACTERS:
+            raise ValueError("validator ignored paths exceed their character bound")
         if path not in normalized:
             normalized.append(path)
     return tuple(normalized)
@@ -244,9 +292,23 @@ class ValidatorDefinition:
             ):
                 raise ValueError(f"{label} is outside its bound")
         try:
-            exit_codes = frozenset(accepted_exit_codes)
+            exit_iterator = iter(accepted_exit_codes)
         except TypeError as error:
             raise TypeError("accepted exit codes must be an iterable of integers") from error
+        exit_values: list[int] = []
+        for index in range(_MAX_EXIT_CODES + 1):
+            try:
+                code = next(exit_iterator)
+            except StopIteration:
+                break
+            except Exception as error:
+                raise TypeError(
+                    "accepted exit codes must be an iterable of integers"
+                ) from error
+            if index >= _MAX_EXIT_CODES:
+                raise ValueError("accepted exit codes are malformed or unbounded")
+            exit_values.append(code)
+        exit_codes = frozenset(exit_values)
         if (
             not exit_codes
             or len(exit_codes) > _MAX_EXIT_CODES

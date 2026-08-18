@@ -95,6 +95,49 @@ def test_scope_rejects_invalid_trusted_configuration(
         WorkspaceScope(**kwargs)  # type: ignore[arg-type]
 
 
+def test_workspace_rule_iterables_are_bounded_before_materialization(tmp_path: Path) -> None:
+    consumed = 0
+    maximum = workspace_module._MAX_RULE_ITEMS
+
+    def secret_paths():
+        nonlocal consumed
+        for index in range(10_000):
+            consumed += 1
+            yield PurePosixPath(f"secret-{index}")
+
+    with pytest.raises(WorkspaceError):
+        WorkspaceScope("fixture", tmp_path, secret_paths=secret_paths())
+
+    assert consumed == maximum + 1
+
+
+def test_sanitizer_iterables_are_bounded_before_materialization() -> None:
+    secret_consumed = 0
+    host_path_consumed = 0
+    secret_maximum = workspace_module._MAX_SANITIZER_ITEMS
+    host_path_maximum = workspace_module._MAX_SANITIZER_HOST_PATH_ITEMS
+
+    def secrets():
+        nonlocal secret_consumed
+        for index in range(10_000):
+            secret_consumed += 1
+            yield f"secret-{index}"
+
+    def host_paths():
+        nonlocal host_path_consumed
+        for index in range(10_000):
+            host_path_consumed += 1
+            yield f"C:/workspace-{index}"
+
+    with pytest.raises(ValueError, match="secrets.*item bound"):
+        Sanitizer(secrets=secrets())
+    with pytest.raises(ValueError, match="host_paths.*item bound"):
+        Sanitizer(host_paths=host_paths())
+
+    assert secret_consumed == secret_maximum + 1
+    assert host_path_consumed == host_path_maximum + 1
+
+
 def test_limits_are_immutable_and_do_not_include_other_owner_limits() -> None:
     limits = WorkspaceLimits(max_path_characters=12, max_diff_characters=30)
 

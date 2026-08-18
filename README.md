@@ -4,10 +4,11 @@ DQAgent is an engineering-first learning project for building AI Agent capabilit
 from foundational components. Its purpose is to understand the design of production-oriented agent
 systems instead of treating frameworks as black boxes.
 
-**Status:** Pre-alpha. Phase 8 is complete within its documented v1 scope, and the Phase 9 T14
-implementation provides a representative credential-free coding baseline above the complete bounded
-coding path. T14 remains pending reviewer remediation and fresh closure; Phase 9 T15 final audit
-work remains planned. DQAgent supports durable bounded sessions, explicit local RAG, optional
+**Status:** Pre-alpha. Phase 8 is complete within its documented v1 scope, and Phase 9 is complete
+within its bounded v1 coding-harness scope. The implementation provides a representative
+credential-free coding baseline above the complete bounded coding path. Host/process isolation,
+live-model quality, and other deferred production capabilities remain outside this phase.
+DQAgent supports durable bounded sessions, explicit local RAG, optional
 exact-scope read-only memory recall, explicit source-to-transient-candidate extraction, and the
 `CodingAgentApplication`/`dqagent-code` foreground CLI with provider-neutral boundaries, governed
 workspace actions, bounded diffs, trusted validators, and deterministic regression tests.
