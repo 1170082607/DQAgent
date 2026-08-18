@@ -1,9 +1,10 @@
 # Behavioral Evaluations
 
-This directory contains versioned behavioral, context, and retrieval cases with committed baseline
-reports.
+This directory contains versioned behavioral, context, retrieval, memory, and disposable coding
+cases with committed baseline reports where a baseline has been accepted.
 Evaluations are kept separate from `tests/`: tests verify deterministic implementation contracts,
-while evaluations measure agent outcomes, bounded model-context projections, or retrieval ranking.
+while evaluations measure agent outcomes, bounded model-context projections, retrieval ranking,
+memory behavior, or production coding-path evidence.
 
 ## Case Contract
 
@@ -141,3 +142,34 @@ prove an LLM can extract true facts or use memory well. There is currently no li
 adding one would require a separate non-CI report with model, prompt, extraction, policy, selector,
 store, context, session, and answer identities, repeated samples, and calibrated expectations.
 The current gate does not require credentials.
+
+## Phase 9 Coding Evaluation
+
+`cases/phase-9-coding-smoke-v1.json` is the T13 versioned coding-evaluation substrate. It deliberately
+contains only three smoke/negative cases: an explicit skill read, an approved single-file update with
+a trusted validator, and a rejected update with no effect. T13 establishes the evaluator contract; the
+representative 8-10-case matrix and any accepted baseline belong to T14.
+
+Run it with:
+
+```bash
+dqagent-coding-eval --mode deterministic \
+  --suite evaluations/cases/phase-9-coding-smoke-v1.json \
+  --output .local/evaluations/phase-9-coding-report.json
+```
+
+Each case declares the request, explicit targets and skills, repository fixture, trusted composition
+fixture, expected/forbidden diff, validator outcomes, governance trajectory, event subsequence, and
+required limits. The loader verifies a SHA-256 digest over the materialized fixture, normalized
+request, case identity/mode, and reviewed expected predicates before execution. The runner creates a
+new temporary repository and production
+`CodingAgentApplication` for every case; only model completions, approval decisions, and
+purpose-built failure dependencies are substituted. Resolver, governance, tools, subprocess,
+context, application, diff, and validator behavior stays real.
+
+Reports use direct bounded predicates rather than a general policy or validator DSL. They include
+sanitized answer, diff, validator, governance, event, limit, and production observation-limitation
+evidence, plus an independent cleanup result. Cleanup failure makes the case fail but cannot turn an
+evaluation failure into a pass or hide the observed result. The suite shares no workspace, process,
+approval, cache, credential, session, retrieval, or memory state. T13 has no live mode and no
+committed coding baseline; local subprocess execution is not a host or workspace sandbox.

@@ -4,12 +4,13 @@ DQAgent is an engineering-first learning project for building AI Agent capabilit
 from foundational components. Its purpose is to understand the design of production-oriented agent
 systems instead of treating frameworks as black boxes.
 
-**Status:** Pre-alpha. Phase 8 is complete within its documented v1 scope, and Phase 9 T12 now
-provides the first complete bounded coding path. DQAgent supports durable bounded sessions, explicit
-local RAG, optional exact-scope read-only memory recall, explicit source-to-transient-candidate
-extraction, and the `CodingAgentApplication`/`dqagent-code` foreground CLI with provider-neutral
-boundaries, governed workspace actions, bounded diffs, trusted validators, and deterministic
-regression tests. Phase 9 T13-T15 evaluation and final audit work remain planned.
+**Status:** Pre-alpha. Phase 8 is complete within its documented v1 scope, and Phase 9 T13 now
+provides a versioned disposable coding-evaluation substrate above the complete bounded coding path.
+DQAgent supports durable bounded sessions, explicit local RAG, optional exact-scope read-only memory
+recall, explicit source-to-transient-candidate extraction, and the
+`CodingAgentApplication`/`dqagent-code` foreground CLI with provider-neutral boundaries, governed
+workspace actions, bounded diffs, trusted validators, and deterministic regression tests. Phase 9
+T14 representative cases and T15 final audit work remain planned.
 
 ## Goals
 
@@ -43,6 +44,8 @@ regression tests. Phase 9 T13-T15 evaluation and final audit work remain planned
   preparation, one governed `AgentRuntime` loop, final diff observation, and trusted validators.
 - A foreground `dqagent-code` CLI with explicit workspace/message/targets/skills, exact approval
   summaries, bounded diff and validator output, evidence-derived verdicts, and blind-spot display.
+- A versioned disposable coding-evaluation substrate with fixture digests, fresh temporary
+  repositories, production-path execution, direct predicates, bounded reports, and cleanup status.
 - A bounded model/tool/observation loop with repeated-call protection.
 - Structured recovery observations for invalid arguments, unknown tools, timeouts, and tool errors.
 - Built-in `current_time` and deterministic `get_weather` demonstration tools.
@@ -190,6 +193,25 @@ dqagent-code --workspace . --message "Update the parser" --target src/dqagent/pa
 The command exits `0` only for a `passed` verdict. `not_validated`, `failed`, and `indeterminate`
 return a nonzero exit. A successful run still displays protected/secret observation blind spots and
 the local subprocess backend's limits; local execution is not a host or workspace sandbox.
+
+## Disposable Coding Evaluation
+
+`dqagent-coding-eval` runs the versioned T13 coding cases in fresh temporary repositories. It replaces
+only deterministic model completions, approval decisions, and purpose-built failure fixtures; the
+resolver, governance, tools, subprocess backend, context projection, application, diff, and
+validators remain the production path.
+
+```bash
+dqagent-coding-eval --mode deterministic \
+  --suite evaluations/cases/phase-9-coding-smoke-v1.json \
+  --output .local/evaluations/phase-9-coding-report.json
+```
+
+The current suite is intentionally three smoke/negative substrate cases, not the representative
+8-10-case T14 matrix or a coding-quality baseline. Cases do not share workspace, process, approval,
+cache, credential, session, retrieval, or memory state. Reports are bounded and retain cleanup
+failure separately from the evaluation result. The local subprocess backend remains non-sandboxed;
+this evaluator does not claim hostile-repository or host/process isolation.
 
 ## Usage
 
@@ -355,6 +377,8 @@ src/dqagent/context.py Prompt assembly, knowledge loading, budgets, and compacti
 src/dqagent/repository_context.py Contained instructions, skill catalog/body loading, and provenance
 src/dqagent/coding.py Production coding application and bounded run evidence
 src/dqagent/coding_cli.py Foreground `dqagent-code` composition and output boundary
+src/dqagent/coding_evaluation.py Versioned disposable coding cases and production-path reports
+src/dqagent/coding_evaluation_cli.py `dqagent-coding-eval` command-line entry point
 src/dqagent/session.py Durable transcript model and session stores
 src/dqagent/context_evaluation.py Deterministic context regression runner
 src/dqagent/retrieval.py Ingestion, embedding, local index, retrieval, and provenance
@@ -388,6 +412,7 @@ dqagent-eval --mode deterministic
 dqagent-context-eval
 dqagent-retrieval-eval
 dqagent-memory-eval
+dqagent-coding-eval --mode deterministic
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for change guidelines.

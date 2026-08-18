@@ -625,6 +625,10 @@ edges, every approval outcome, hook modes, individual limits, process races, dup
 and legacy Phase 3 behavior. The evaluation case format remains domain-specific and does not become a
 general validator or policy DSL.
 
+The T13 implementation intentionally stops at a three-case smoke/negative suite. It proves the
+substrate's production-path composition and negative meta-properties without claiming representative
+coding coverage or a baseline. Expanding to the cases above is the T14 checkpoint.
+
 ## 14. Implementation Dependency Graph
 
 ```text
@@ -725,6 +729,8 @@ verdict, exact approval UX, and bounded final display. Keep Session/RAG/Memory d
 
 Add versioned fixture definitions, temporary materialization, production-path runner, direct
 predicates, safe reports, cleanup, and CLI integration without yet expanding a large case matrix.
+Implemented as `coding_evaluation.py`, `coding_evaluation_cli.py`, and the three-case
+`phase-9-coding-smoke-v1.json` substrate suite.
 
 ### T14: Representative cases, baseline, and documentation
 

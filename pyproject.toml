@@ -29,6 +29,7 @@ dev = [
 dqagent = "dqagent.cli:main"
 dqagent-code = "dqagent.coding_cli:main"
 dqagent-eval = "dqagent.evaluation_cli:main"
+dqagent-coding-eval = "dqagent.coding_evaluation_cli:main"
 dqagent-context-eval = "dqagent.context_evaluation_cli:main"
 dqagent-index = "dqagent.retrieval_cli:main"
 dqagent-retrieval-eval = "dqagent.retrieval_evaluation_cli:main"

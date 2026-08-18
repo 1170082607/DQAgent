@@ -2,15 +2,16 @@
 
 ## Status
 
-This document describes the implemented Phase 8 T5-T13 architecture and the Phase 9 T1-T12
+This document describes the implemented Phase 8 T5-T13 architecture and the Phase 9 T1-T13
 foundations. Memory management is available as a model-free explicit application service,
 request-time policy-filtered recall, an optional durable session read stage, a bounded context
 projection, a pure source-to-transient-candidate extraction boundary, and independent memory/session
 CLI composition. Phase 9 currently has workspace authority/observation, prepared-action governance,
 exact foreground approval, synchronous hook contracts, a governed execution/runtime bridge, bounded
 workspace read/search/patch tools, local bounded subprocess contracts, governed command/validator
-composition, and the `CodingAgentApplication`/`dqagent-code` foreground path. Disposable coding
-evaluation and final Phase 9 audit remain later checkpoints.
+composition, the `CodingAgentApplication`/`dqagent-code` foreground path, and a disposable coding
+evaluation substrate. The representative coding matrix and final Phase 9 audit remain later
+checkpoints.
 The roadmap remains the source of truth for deferred capabilities.
 
 ## System Context
@@ -50,6 +51,9 @@ Context case -> ContextEvaluationRunner -> production ContextBuilder -> context 
 Memory case -> MemoryEvaluationRunner -> MemoryService + MemorySelector + ContextBuilder
                                       -> SessionAgentApplication + scripted fixtures -> layered report
 
+Coding case -> CodingEvaluationRunner -> fresh temporary Workspace
+                                      -> CodingAgentApplication + scripted fixtures -> bounded report
+
 Memory management request -> dqagent-memory CLI -> MemoryService
                                       |             +-> MemoryPolicy + MemoryConsolidator + MemoryStore
                                       +-> explicit scope, confirmation, and output boundary
@@ -78,9 +82,10 @@ application receives one `MemoryService` and one exact `MemoryScope`. A later pr
 ID resumes the stored transcript. Without `--session-id`, memory configuration is rejected and the
 original `AgentApplication` behavior remains.
 
-The evaluation CLI is a separate composition root. It loads versioned cases, selects either a
-scripted or live `LLMClient`, creates an isolated production runtime per case, and writes a structured
-report. Evaluation does not add a second agent loop.
+The evaluation CLIs are separate composition roots. The general evaluation CLI loads versioned cases,
+selects either a scripted or live `LLMClient`, creates an isolated production runtime per case, and
+writes a structured report. The coding evaluation CLI creates a fresh temporary repository and
+production `CodingAgentApplication` per case. Evaluation does not add a second agent loop.
 
 Workflow definitions are application composition. `WorkflowRunner` executes known control flow and
 persists progress through a `CheckpointStore`; an agent runtime may be called inside a node when a
@@ -483,6 +488,25 @@ Version 1 evaluates:
 LLM-as-judge remains excluded because all current qualities have direct predicates. The harness is
 intentionally product-specific rather than a general benchmark framework.
 
+### Disposable coding evaluation
+
+`CodingEvaluationRunner` loads schema-versioned cases, validates a fixture digest, materializes a
+fresh repository, and calls the production `CodingAgentApplication`. A case can replace only its
+deterministic model completions, exact approval decisions, and one purpose-built failure dependency.
+The resolver, governed action path, workspace tools, subprocess backend, repository context,
+`ContextBuilder`, final diff, and validators remain the production implementations.
+
+Direct predicates cover the final answer, run state and error, exact expected changes, forbidden
+paths, diff completeness, validator statuses, governance and approval trajectory, required events,
+fixture consumption, and bounded attempts/calls/time/output. Reports sanitize paths, executable
+arguments, and configured secret values. Cleanup is reported independently and still contributes to
+the case verdict, so cleanup failure cannot conceal the evaluation result.
+
+The T13 suite is intentionally a three-case substrate smoke suite. It is not the representative
+T14 matrix, a live-model quality evaluation, or a hostile-repository/process-isolation claim. Cases
+share no workspace, process, approval, cache, credential, session, retrieval, or memory state, and
+the case vocabulary remains domain-specific rather than a general policy or validator DSL.
+
 ## Workflow and Durable Execution
 
 `WorkflowDefinition` is an acyclic graph of explicit `WorkflowNode` values. Every node has one end,
@@ -849,7 +873,7 @@ nondeterminism make it an unsuitable correctness gate.
 - Agent-requested tool calls are sequential and tool retries are intentionally unsupported.
 - The coding application serializes one workspace in-process only. Its local subprocess backend does
   not isolate host filesystem, network, credentials, system calls, or descendant processes; Phase 9
-  T13-T15 disposable evaluation and final audit are still pending.
+  T14 representative coding cases and T15 final audit are still pending.
 - Event sinks are best-effort and no concrete durable telemetry adapter is included.
 - The legacy `AgentApplication` remains process-local and unbounded; durable behavior requires an
   explicit `SessionAgentApplication` or CLI `--session-id`.
