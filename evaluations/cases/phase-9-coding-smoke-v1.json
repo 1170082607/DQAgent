@@ -134,7 +134,7 @@
                 "arguments": {
                   "operation": "update",
                   "path": "target.txt",
-                  "expected_sha256": "5259d46a49644bf76792231ef7315b5293677c49ddd7e69d95557013e10320d4",
+                  "expected_sha256": "2c8b08da5ce60398e1f19af0e5dccc744df274b826abe585eaba68c525434806",
                   "replacements": [
                     {"old": "one", "new": "two", "expected_occurrences": 1}
                   ]
@@ -190,8 +190,8 @@
             {
               "path": "target.txt",
               "kind": "modify",
-              "before_sha256": "5259d46a49644bf76792231ef7315b5293677c49ddd7e69d95557013e10320d4",
-              "after_sha256": "140eeaa0223494102ae8f7a5fe2df425c49d226ad50b98e52989a049f624780e"
+              "before_sha256": "2c8b08da5ce60398e1f19af0e5dccc744df274b826abe585eaba68c525434806",
+              "after_sha256": "27dd8ed44a83ff94d557f9fd0412ed5a8cbca69ea04922d88c01184a07300a5a"
             }
           ],
           "forbidden_paths": [],
@@ -234,7 +234,7 @@
         },
         "fixture_consumed": true
       },
-      "fixture_digest": "b329ffc240570dde8bae4a0db0055c10bbdbdebf42769e1b61bc4621b46c44a8"
+      "fixture_digest": "d3d378c214f676396897f5ef1f9fa319fc235f2cee2b03d7e08a3d4ee6972d17"
     },
     {
       "id": "rejected-create-no-effect",
@@ -265,7 +265,7 @@
                 "arguments": {
                   "operation": "update",
                   "path": "target.txt",
-                  "expected_sha256": "5259d46a49644bf76792231ef7315b5293677c49ddd7e69d95557013e10320d4",
+                  "expected_sha256": "2c8b08da5ce60398e1f19af0e5dccc744df274b826abe585eaba68c525434806",
                   "replacements": [
                     {"old": "one", "new": "two", "expected_occurrences": 1}
                   ]
@@ -343,7 +343,7 @@
         },
         "fixture_consumed": true
       },
-      "fixture_digest": "21e157034acd6662c3399996bcc46be242cc160ad85023aa2aeafbdfb2f5cfce"
+      "fixture_digest": "a8976ed198728ed907ffa197fce6695c84df0801a0dc51bbc6a2d9e610db1e56"
     }
   ]
 }

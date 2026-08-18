@@ -179,7 +179,9 @@ Each case declares the request, explicit targets and skills, repository fixture,
 fixture, expected/forbidden diff, validator outcomes, governance trajectory, content-free context
 evidence, event subsequence, and required limits. The loader verifies a SHA-256 digest over the
 materialized fixture, normalized request, case identity/mode, and reviewed expected predicates
-before execution. The runner creates a new temporary repository and production
+before execution. Fixture file contents are materialized as their declared UTF-8 bytes without
+platform newline translation, so content digests remain portable across CI operating systems. The
+runner creates a new temporary repository and production
 `CodingAgentApplication` for every case; only model completions, approval decisions, and
 purpose-built failure dependencies are substituted. Resolver, governance, tools, subprocess,
 context, application, diff, and validator behavior stays real.

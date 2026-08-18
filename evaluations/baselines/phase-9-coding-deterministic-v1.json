@@ -78,18 +78,18 @@
           ],
           "selected_count": 1,
           "omitted_count": 0,
-          "aggregate_characters": 35,
+          "aggregate_characters": 34,
           "max_aggregate_characters": 128000,
           "selected": [
             {
               "kind": "instruction",
               "key": "AGENTS.md",
               "source": "AGENTS.md",
-              "digest": "c6a82c0bacf495821ecc2d45d263889f041bf95e4fc115c9370d07385c21adfe",
+              "digest": "0ddf07fd220b74925778ab7d38becc8f854850fa6b3f5d7dab081575a1557d19",
               "applicable_subtree": ".",
               "selection_reason": "root_ancestor",
               "authority": "repository_guidance",
-              "character_count": 35
+              "character_count": 34
             }
           ],
           "skill_catalog": [],
@@ -97,7 +97,7 @@
           "omitted": []
         },
         "window": {
-          "estimated_characters": 892,
+          "estimated_characters": 890,
           "max_characters": 28000,
           "retained_turns": 1,
           "omitted_turns": 0,
@@ -120,7 +120,7 @@
           "repository_instruction_budget": 8000,
           "repository_catalog_budget": 4000,
           "repository_body_budget": 16000,
-          "repository_instruction_used_characters": 422,
+          "repository_instruction_used_characters": 420,
           "repository_catalog_used_characters": 0,
           "repository_body_used_characters": 0,
           "repository_selected": [
@@ -128,10 +128,10 @@
               "kind": "instruction",
               "key": "AGENTS.md",
               "source": "AGENTS.md",
-              "digest": "c6a82c0bacf495821ecc2d45d263889f041bf95e4fc115c9370d07385c21adfe",
+              "digest": "0ddf07fd220b74925778ab7d38becc8f854850fa6b3f5d7dab081575a1557d19",
               "selection_reason": "root_ancestor",
               "authority": "repository_guidance",
-              "character_count": 35
+              "character_count": 34
             }
           ],
           "repository_omitted": []
@@ -284,7 +284,7 @@
       "passed": true,
       "evaluation_passed": true,
       "cleanup_passed": true,
-      "fixture_digest": "9abd83fe9a5fa3c7a680c3ead467160323357c27964b37365e6662bfe54f2252",
+      "fixture_digest": "b4a240cc29603eda0a73171f0d0ea6d42334cfb9062f51e1dabe75f5c38273bb",
       "run_id": "e8c1ac07-6703-453f-a192-35738e97ef07",
       "run_state": "completed",
       "verdict": "passed",
@@ -331,7 +331,7 @@
           "effect_state": "complete",
           "executor_attempts": 1,
           "guards_passed": true,
-          "action_digest": "93a4b2a21a95681e5983844174148494e63b5fbd150dd8961c5ad1e2108aca72",
+          "action_digest": "ef4326d7e3cacf4bc755fca46d59f0da50d5fb103454076e422d9a5520a065d8",
           "action_display": "workspace_patch operation=update path=target.txt",
           "diagnostics": [],
           "pre_hooks": [],
@@ -346,18 +346,18 @@
           ],
           "selected_count": 1,
           "omitted_count": 0,
-          "aggregate_characters": 40,
+          "aggregate_characters": 39,
           "max_aggregate_characters": 128000,
           "selected": [
             {
               "kind": "instruction",
               "key": "AGENTS.md",
               "source": "AGENTS.md",
-              "digest": "fb9a9363b313e8a8739175b8a03547d2de56c8f3b240046662a58c377d2cc0da",
+              "digest": "399170265725c332e15637ebecfec045ea22a0b93357c65475160134bde9be48",
               "applicable_subtree": ".",
               "selection_reason": "root_ancestor",
               "authority": "repository_guidance",
-              "character_count": 40
+              "character_count": 39
             }
           ],
           "skill_catalog": [],
@@ -365,7 +365,7 @@
           "omitted": []
         },
         "window": {
-          "estimated_characters": 898,
+          "estimated_characters": 896,
           "max_characters": 28000,
           "retained_turns": 1,
           "omitted_turns": 0,
@@ -388,7 +388,7 @@
           "repository_instruction_budget": 8000,
           "repository_catalog_budget": 4000,
           "repository_body_budget": 16000,
-          "repository_instruction_used_characters": 427,
+          "repository_instruction_used_characters": 425,
           "repository_catalog_used_characters": 0,
           "repository_body_used_characters": 0,
           "repository_selected": [
@@ -396,10 +396,10 @@
               "kind": "instruction",
               "key": "AGENTS.md",
               "source": "AGENTS.md",
-              "digest": "fb9a9363b313e8a8739175b8a03547d2de56c8f3b240046662a58c377d2cc0da",
+              "digest": "399170265725c332e15637ebecfec045ea22a0b93357c65475160134bde9be48",
               "selection_reason": "root_ancestor",
               "authority": "repository_guidance",
-              "character_count": 40
+              "character_count": 39
             }
           ],
           "repository_omitted": []
@@ -521,7 +521,7 @@
           "call_id": "patch-1",
           "name": "workspace_patch",
           "arguments": {
-            "expected_sha256": "5259d46a49644bf76792231ef7315b5293677c49ddd7e69d95557013e10320d4",
+            "expected_sha256": "2c8b08da5ce60398e1f19af0e5dccc744df274b826abe585eaba68c525434806",
             "operation": "update",
             "path": "target.txt",
             "replacements": [
@@ -601,18 +601,18 @@
           ],
           "selected_count": 1,
           "omitted_count": 0,
-          "aggregate_characters": 44,
+          "aggregate_characters": 43,
           "max_aggregate_characters": 128000,
           "selected": [
             {
               "kind": "instruction",
               "key": "AGENTS.md",
               "source": "AGENTS.md",
-              "digest": "ebdf4744a4ab767f62484a9d4b6d50cff80b22bba1358a428d231cac73ae15bd",
+              "digest": "045588aa14ff16abfd76810bd8bf30ca7befa61195bbe3e58fe3849e5868a484",
               "applicable_subtree": ".",
               "selection_reason": "root_ancestor",
               "authority": "repository_guidance",
-              "character_count": 44
+              "character_count": 43
             }
           ],
           "skill_catalog": [],
@@ -620,7 +620,7 @@
           "omitted": []
         },
         "window": {
-          "estimated_characters": 900,
+          "estimated_characters": 898,
           "max_characters": 28000,
           "retained_turns": 1,
           "omitted_turns": 0,
@@ -643,7 +643,7 @@
           "repository_instruction_budget": 8000,
           "repository_catalog_budget": 4000,
           "repository_body_budget": 16000,
-          "repository_instruction_used_characters": 431,
+          "repository_instruction_used_characters": 429,
           "repository_catalog_used_characters": 0,
           "repository_body_used_characters": 0,
           "repository_selected": [
@@ -651,10 +651,10 @@
               "kind": "instruction",
               "key": "AGENTS.md",
               "source": "AGENTS.md",
-              "digest": "ebdf4744a4ab767f62484a9d4b6d50cff80b22bba1358a428d231cac73ae15bd",
+              "digest": "045588aa14ff16abfd76810bd8bf30ca7befa61195bbe3e58fe3849e5868a484",
               "selection_reason": "root_ancestor",
               "authority": "repository_guidance",
-              "character_count": 44
+              "character_count": 43
             }
           ],
           "repository_omitted": []
@@ -826,7 +826,7 @@
       "passed": true,
       "evaluation_passed": true,
       "cleanup_passed": true,
-      "fixture_digest": "fa157c89519dd0bebcce01643f6ecc1387dad5e7543dff8d1351c575503fd19a",
+      "fixture_digest": "66361e658c24ee29d07b1f75fdb3f9ceef6bf8d4677d20c037bd42decb619e28",
       "run_id": "a3ac76b2-207c-4245-8ed1-45cdf6cae6d8",
       "run_state": "completed",
       "verdict": "not_validated",
@@ -852,7 +852,7 @@
           "effect_state": "none",
           "executor_attempts": 0,
           "guards_passed": true,
-          "action_digest": "c0d708dbc92a5eff4f947ed966ce0f28f902e76dfa33bc29466feb4ea23e2986",
+          "action_digest": "0ff9277085b129e59854b17c93de0e202f6432a28926c92e0e46a01daa29d26b",
           "action_display": "workspace_patch operation=update path=target.txt",
           "diagnostics": [],
           "pre_hooks": [],
@@ -867,7 +867,7 @@
           "effect_state": "none",
           "executor_attempts": 0,
           "guards_passed": true,
-          "action_digest": "05de82304e31b877ce438cb2030893449ce7b78667ffbd67e558f05814c1d53a",
+          "action_digest": "68da124d9c25a73a256f090d3c2d34f63ecc1b104ceee744fac334e7198ad84d",
           "action_display": "workspace_patch operation=update path=target.txt",
           "diagnostics": [],
           "pre_hooks": [],
@@ -882,18 +882,18 @@
           ],
           "selected_count": 1,
           "omitted_count": 0,
-          "aggregate_characters": 53,
+          "aggregate_characters": 52,
           "max_aggregate_characters": 128000,
           "selected": [
             {
               "kind": "instruction",
               "key": "AGENTS.md",
               "source": "AGENTS.md",
-              "digest": "ba48856e9227b66fab2f509a1c86f84e2a567671c1bae8742e034d6f26a1af5f",
+              "digest": "1b07847fb60f34b103954d009b6350712b66ba81508b86b383526259aa70f0ab",
               "applicable_subtree": ".",
               "selection_reason": "root_ancestor",
               "authority": "repository_guidance",
-              "character_count": 53
+              "character_count": 52
             }
           ],
           "skill_catalog": [],
@@ -901,7 +901,7 @@
           "omitted": []
         },
         "window": {
-          "estimated_characters": 916,
+          "estimated_characters": 914,
           "max_characters": 28000,
           "retained_turns": 1,
           "omitted_turns": 0,
@@ -924,7 +924,7 @@
           "repository_instruction_budget": 8000,
           "repository_catalog_budget": 4000,
           "repository_body_budget": 16000,
-          "repository_instruction_used_characters": 440,
+          "repository_instruction_used_characters": 438,
           "repository_catalog_used_characters": 0,
           "repository_body_used_characters": 0,
           "repository_selected": [
@@ -932,10 +932,10 @@
               "kind": "instruction",
               "key": "AGENTS.md",
               "source": "AGENTS.md",
-              "digest": "ba48856e9227b66fab2f509a1c86f84e2a567671c1bae8742e034d6f26a1af5f",
+              "digest": "1b07847fb60f34b103954d009b6350712b66ba81508b86b383526259aa70f0ab",
               "selection_reason": "root_ancestor",
               "authority": "repository_guidance",
-              "character_count": 53
+              "character_count": 52
             }
           ],
           "repository_omitted": []
@@ -1057,7 +1057,7 @@
           "call_id": "reject-1",
           "name": "workspace_patch",
           "arguments": {
-            "expected_sha256": "5259d46a49644bf76792231ef7315b5293677c49ddd7e69d95557013e10320d4",
+            "expected_sha256": "2c8b08da5ce60398e1f19af0e5dccc744df274b826abe585eaba68c525434806",
             "operation": "update",
             "path": "target.txt",
             "replacements": [
@@ -1075,7 +1075,7 @@
           "call_id": "stale-1",
           "name": "workspace_patch",
           "arguments": {
-            "expected_sha256": "5259d46a49644bf76792231ef7315b5293677c49ddd7e69d95557013e10320d4",
+            "expected_sha256": "2c8b08da5ce60398e1f19af0e5dccc744df274b826abe585eaba68c525434806",
             "operation": "update",
             "path": "target.txt",
             "replacements": [
@@ -1096,7 +1096,7 @@
       "passed": true,
       "evaluation_passed": true,
       "cleanup_passed": true,
-      "fixture_digest": "9bc995fdc113b732eb8fc134e6a799e09fa693348323ed66c07916b6d291218a",
+      "fixture_digest": "cd77be2bb00f632a0b07c4d0e5ce2423b12391840a879d284863721f6bbba82a",
       "run_id": "5c0f15de-41e6-48ce-8e99-fea6ebffecf2",
       "run_state": "completed",
       "verdict": "not_validated",
@@ -1122,7 +1122,7 @@
           "effect_state": "none",
           "executor_attempts": 0,
           "guards_passed": true,
-          "action_digest": "a6321da6ba48221e53480bc8aba7f1db865279ec87d4033e0bd4e3f8a2dc9a14",
+          "action_digest": "d32175aa6a58628d320f1c5d73126cdb12bb3cd84409a3a2255cefaf1d7d5dbe",
           "action_display": "workspace_patch operation=update path=target.txt",
           "diagnostics": [],
           "pre_hooks": [
@@ -1143,18 +1143,18 @@
           ],
           "selected_count": 1,
           "omitted_count": 0,
-          "aggregate_characters": 49,
+          "aggregate_characters": 48,
           "max_aggregate_characters": 128000,
           "selected": [
             {
               "kind": "instruction",
               "key": "AGENTS.md",
               "source": "AGENTS.md",
-              "digest": "4b448633e08e92ee0939b8c98b979d70ffad8e2fcfe2302a3c2c2dec95b8d339",
+              "digest": "dd6abceb2bd220029fcdcaf9e512cf5a9620ae522690aacd487886b6ba79ad01",
               "applicable_subtree": ".",
               "selection_reason": "root_ancestor",
               "authority": "repository_guidance",
-              "character_count": 49
+              "character_count": 48
             }
           ],
           "skill_catalog": [],
@@ -1162,7 +1162,7 @@
           "omitted": []
         },
         "window": {
-          "estimated_characters": 910,
+          "estimated_characters": 908,
           "max_characters": 28000,
           "retained_turns": 1,
           "omitted_turns": 0,
@@ -1185,7 +1185,7 @@
           "repository_instruction_budget": 8000,
           "repository_catalog_budget": 4000,
           "repository_body_budget": 16000,
-          "repository_instruction_used_characters": 436,
+          "repository_instruction_used_characters": 434,
           "repository_catalog_used_characters": 0,
           "repository_body_used_characters": 0,
           "repository_selected": [
@@ -1193,10 +1193,10 @@
               "kind": "instruction",
               "key": "AGENTS.md",
               "source": "AGENTS.md",
-              "digest": "4b448633e08e92ee0939b8c98b979d70ffad8e2fcfe2302a3c2c2dec95b8d339",
+              "digest": "dd6abceb2bd220029fcdcaf9e512cf5a9620ae522690aacd487886b6ba79ad01",
               "selection_reason": "root_ancestor",
               "authority": "repository_guidance",
-              "character_count": 49
+              "character_count": 48
             }
           ],
           "repository_omitted": []
@@ -1318,7 +1318,7 @@
           "call_id": "pre-hook-1",
           "name": "workspace_patch",
           "arguments": {
-            "expected_sha256": "5259d46a49644bf76792231ef7315b5293677c49ddd7e69d95557013e10320d4",
+            "expected_sha256": "2c8b08da5ce60398e1f19af0e5dccc744df274b826abe585eaba68c525434806",
             "operation": "update",
             "path": "target.txt",
             "replacements": [
@@ -1339,7 +1339,7 @@
       "passed": true,
       "evaluation_passed": true,
       "cleanup_passed": true,
-      "fixture_digest": "db7ae135959068e2690e3d38f8e3c9837db924781f4a66b29909b4f0566af80a",
+      "fixture_digest": "0b822c6ad1a69eec955de40a677ed8f86c232c40d58dfd7314526364c4522458",
       "run_id": "e741f31a-8ec2-4c47-9e61-5fee3ef2b90f",
       "run_state": "completed",
       "verdict": "passed",
@@ -1386,7 +1386,7 @@
           "effect_state": "complete",
           "executor_attempts": 1,
           "guards_passed": true,
-          "action_digest": "2e15af533e8c435c5be4862497174be90f040586bb6d562c675d933a74b95056",
+          "action_digest": "ef3ba5603443b53d3f48bbd13e04d4c3cfe990136888e01ebebb88584c3692b9",
           "action_display": "workspace_patch operation=update path=target.txt",
           "diagnostics": [],
           "pre_hooks": [],
@@ -1407,18 +1407,18 @@
           ],
           "selected_count": 1,
           "omitted_count": 0,
-          "aggregate_characters": 58,
+          "aggregate_characters": 57,
           "max_aggregate_characters": 128000,
           "selected": [
             {
               "kind": "instruction",
               "key": "AGENTS.md",
               "source": "AGENTS.md",
-              "digest": "3ae0462fe83fe042c0556abf36a996a72401245afdbf427ed2d92ce84164fa00",
+              "digest": "3669e583bcc6d60026fdaa00ec9cfd892273db5b0883dab809408fce75ff5f17",
               "applicable_subtree": ".",
               "selection_reason": "root_ancestor",
               "authority": "repository_guidance",
-              "character_count": 58
+              "character_count": 57
             }
           ],
           "skill_catalog": [],
@@ -1426,7 +1426,7 @@
           "omitted": []
         },
         "window": {
-          "estimated_characters": 939,
+          "estimated_characters": 937,
           "max_characters": 28000,
           "retained_turns": 1,
           "omitted_turns": 0,
@@ -1449,7 +1449,7 @@
           "repository_instruction_budget": 8000,
           "repository_catalog_budget": 4000,
           "repository_body_budget": 16000,
-          "repository_instruction_used_characters": 445,
+          "repository_instruction_used_characters": 443,
           "repository_catalog_used_characters": 0,
           "repository_body_used_characters": 0,
           "repository_selected": [
@@ -1457,10 +1457,10 @@
               "kind": "instruction",
               "key": "AGENTS.md",
               "source": "AGENTS.md",
-              "digest": "3ae0462fe83fe042c0556abf36a996a72401245afdbf427ed2d92ce84164fa00",
+              "digest": "3669e583bcc6d60026fdaa00ec9cfd892273db5b0883dab809408fce75ff5f17",
               "selection_reason": "root_ancestor",
               "authority": "repository_guidance",
-              "character_count": 58
+              "character_count": 57
             }
           ],
           "repository_omitted": []
@@ -1582,7 +1582,7 @@
           "call_id": "post-hook-1",
           "name": "workspace_patch",
           "arguments": {
-            "expected_sha256": "5259d46a49644bf76792231ef7315b5293677c49ddd7e69d95557013e10320d4",
+            "expected_sha256": "2c8b08da5ce60398e1f19af0e5dccc744df274b826abe585eaba68c525434806",
             "operation": "update",
             "path": "target.txt",
             "replacements": [
@@ -1682,18 +1682,18 @@
           ],
           "selected_count": 1,
           "omitted_count": 0,
-          "aggregate_characters": 59,
+          "aggregate_characters": 58,
           "max_aggregate_characters": 128000,
           "selected": [
             {
               "kind": "instruction",
               "key": "AGENTS.md",
               "source": "AGENTS.md",
-              "digest": "8f2cfdef8c9b402fa86627c4c84422aa7899bbbc413f057ac57d55185e34249b",
+              "digest": "9e47cc1856c5080ef6620395badcc65ca46bd05edcf4db81f0f71d663a2abf7a",
               "applicable_subtree": ".",
               "selection_reason": "root_ancestor",
               "authority": "repository_guidance",
-              "character_count": 59
+              "character_count": 58
             }
           ],
           "skill_catalog": [],
@@ -1701,7 +1701,7 @@
           "omitted": []
         },
         "window": {
-          "estimated_characters": 928,
+          "estimated_characters": 926,
           "max_characters": 28000,
           "retained_turns": 1,
           "omitted_turns": 0,
@@ -1724,7 +1724,7 @@
           "repository_instruction_budget": 8000,
           "repository_catalog_budget": 4000,
           "repository_body_budget": 16000,
-          "repository_instruction_used_characters": 446,
+          "repository_instruction_used_characters": 444,
           "repository_catalog_used_characters": 0,
           "repository_body_used_characters": 0,
           "repository_selected": [
@@ -1732,10 +1732,10 @@
               "kind": "instruction",
               "key": "AGENTS.md",
               "source": "AGENTS.md",
-              "digest": "8f2cfdef8c9b402fa86627c4c84422aa7899bbbc413f057ac57d55185e34249b",
+              "digest": "9e47cc1856c5080ef6620395badcc65ca46bd05edcf4db81f0f71d663a2abf7a",
               "selection_reason": "root_ancestor",
               "authority": "repository_guidance",
-              "character_count": 59
+              "character_count": 58
             }
           ],
           "repository_omitted": []
@@ -1916,7 +1916,7 @@
       "passed": true,
       "evaluation_passed": true,
       "cleanup_passed": true,
-      "fixture_digest": "53d3e94fd904e01a15e1eed7de303ed50632543fa76ed059c2caea148a86fa0c",
+      "fixture_digest": "de062801d10d0fed0cf67a8c50d4a169f2200fe62413d52180bb4e27460df3d3",
       "run_id": "b81b75d1-c296-4422-82ec-029d53f66c2b",
       "run_state": "completed",
       "verdict": "failed",
@@ -1963,7 +1963,7 @@
           "effect_state": "complete",
           "executor_attempts": 1,
           "guards_passed": true,
-          "action_digest": "dd3e8a112b09da896d2bb33c0bfa1f48363e7367650985f93c41e51bbd71321b",
+          "action_digest": "60bc17a820b91b2f7415c028201681c13410e8ccc6519c6280e0311fa1895d95",
           "action_display": "workspace_patch operation=update path=target.txt",
           "diagnostics": [],
           "pre_hooks": [],
@@ -1978,18 +1978,18 @@
           ],
           "selected_count": 1,
           "omitted_count": 0,
-          "aggregate_characters": 41,
+          "aggregate_characters": 40,
           "max_aggregate_characters": 128000,
           "selected": [
             {
               "kind": "instruction",
               "key": "AGENTS.md",
               "source": "AGENTS.md",
-              "digest": "00f9c2f961ec3684e6a1c3e4b4144690a61e38ad6033fa787d0f476e9df44b0a",
+              "digest": "79c9b9cec23329d63698a53b11c8f2a0c5cf7223d8e06dfb094dc811944eca59",
               "applicable_subtree": ".",
               "selection_reason": "root_ancestor",
               "authority": "repository_guidance",
-              "character_count": 41
+              "character_count": 40
             }
           ],
           "skill_catalog": [],
@@ -1997,7 +1997,7 @@
           "omitted": []
         },
         "window": {
-          "estimated_characters": 902,
+          "estimated_characters": 900,
           "max_characters": 28000,
           "retained_turns": 1,
           "omitted_turns": 0,
@@ -2020,7 +2020,7 @@
           "repository_instruction_budget": 8000,
           "repository_catalog_budget": 4000,
           "repository_body_budget": 16000,
-          "repository_instruction_used_characters": 428,
+          "repository_instruction_used_characters": 426,
           "repository_catalog_used_characters": 0,
           "repository_body_used_characters": 0,
           "repository_selected": [
@@ -2028,10 +2028,10 @@
               "kind": "instruction",
               "key": "AGENTS.md",
               "source": "AGENTS.md",
-              "digest": "00f9c2f961ec3684e6a1c3e4b4144690a61e38ad6033fa787d0f476e9df44b0a",
+              "digest": "79c9b9cec23329d63698a53b11c8f2a0c5cf7223d8e06dfb094dc811944eca59",
               "selection_reason": "root_ancestor",
               "authority": "repository_guidance",
-              "character_count": 41
+              "character_count": 40
             }
           ],
           "repository_omitted": []
@@ -2153,7 +2153,7 @@
           "call_id": "validator-fail-1",
           "name": "workspace_patch",
           "arguments": {
-            "expected_sha256": "5259d46a49644bf76792231ef7315b5293677c49ddd7e69d95557013e10320d4",
+            "expected_sha256": "2c8b08da5ce60398e1f19af0e5dccc744df274b826abe585eaba68c525434806",
             "operation": "update",
             "path": "target.txt",
             "replacements": [
@@ -2217,28 +2217,28 @@
           ],
           "selected_count": 4,
           "omitted_count": 1,
-          "aggregate_characters": 128,
+          "aggregate_characters": 126,
           "max_aggregate_characters": 128000,
           "selected": [
             {
               "kind": "instruction",
               "key": "AGENTS.md",
               "source": "AGENTS.md",
-              "digest": "4beeb91d07437287887477843c5e98fb9abef0cfc5d08a3958197ea15023af79",
+              "digest": "af1cf17eb2602f7c769765e2c656e3e94ab7d15c3bfbd70a53873cf0c22805e5",
               "applicable_subtree": ".",
               "selection_reason": "root_ancestor",
               "authority": "repository_guidance",
-              "character_count": 70
+              "character_count": 69
             },
             {
               "kind": "instruction",
               "key": "src/AGENTS.md",
               "source": "src/AGENTS.md",
-              "digest": "b943932c52f0a6fdfb01bc7f332e84842200cc39ba5480801c7e10c14c02a113",
+              "digest": "aa69b32306ed68fef40189fe2d8ec38f0796dcb8eca24bc00a7e7e2541c7c398",
               "applicable_subtree": "src",
               "selection_reason": "target_ancestor",
               "authority": "repository_guidance",
-              "character_count": 58
+              "character_count": 57
             }
           ],
           "skill_catalog": [
@@ -2256,10 +2256,10 @@
             "kind": "skill_body",
             "key": "style",
             "source": "repository/style/SKILL.md",
-            "digest": "9c53afc757503856e376678a0801041e52fe7e6c5a7eca0df3e7a47918995cdf",
+            "digest": "562ba3dc2467815ab5053288b4b7f748890f4e25c4bb02efb89e2d869826d283",
             "selection_reason": "explicit_key",
             "authority": "repository_guidance",
-            "character_count": 92
+            "character_count": 86
           },
           "omitted": [
             {
@@ -2272,12 +2272,12 @@
               "authority": "repository_guidance",
               "reason": "skill_invalid",
               "character_count": null,
-              "byte_count": 37
+              "byte_count": 33
             }
           ]
         },
         "window": {
-          "estimated_characters": 2262,
+          "estimated_characters": 2246,
           "max_characters": 28000,
           "retained_turns": 1,
           "omitted_turns": 0,
@@ -2300,27 +2300,27 @@
           "repository_instruction_budget": 8000,
           "repository_catalog_budget": 4000,
           "repository_body_budget": 16000,
-          "repository_instruction_used_characters": 910,
+          "repository_instruction_used_characters": 906,
           "repository_catalog_used_characters": 377,
-          "repository_body_used_characters": 480,
+          "repository_body_used_characters": 468,
           "repository_selected": [
             {
               "kind": "instruction",
               "key": "AGENTS.md",
               "source": "AGENTS.md",
-              "digest": "4beeb91d07437287887477843c5e98fb9abef0cfc5d08a3958197ea15023af79",
+              "digest": "af1cf17eb2602f7c769765e2c656e3e94ab7d15c3bfbd70a53873cf0c22805e5",
               "selection_reason": "root_ancestor",
               "authority": "repository_guidance",
-              "character_count": 70
+              "character_count": 69
             },
             {
               "kind": "instruction",
               "key": "src/AGENTS.md",
               "source": "src/AGENTS.md",
-              "digest": "b943932c52f0a6fdfb01bc7f332e84842200cc39ba5480801c7e10c14c02a113",
+              "digest": "aa69b32306ed68fef40189fe2d8ec38f0796dcb8eca24bc00a7e7e2541c7c398",
               "selection_reason": "target_ancestor",
               "authority": "repository_guidance",
-              "character_count": 58
+              "character_count": 57
             },
             {
               "kind": "skill_catalog",
@@ -2335,10 +2335,10 @@
               "kind": "skill_body",
               "key": "style",
               "source": "repository/style/SKILL.md",
-              "digest": "9c53afc757503856e376678a0801041e52fe7e6c5a7eca0df3e7a47918995cdf",
+              "digest": "562ba3dc2467815ab5053288b4b7f748890f4e25c4bb02efb89e2d869826d283",
               "selection_reason": "explicit_key",
               "authority": "repository_guidance",
-              "character_count": 92
+              "character_count": 86
             }
           ],
           "repository_omitted": [
@@ -2349,7 +2349,7 @@
               "digest": null,
               "reason": "skill_invalid",
               "character_count": null,
-              "byte_count": 37
+              "byte_count": 33
             }
           ]
         }
@@ -2527,18 +2527,18 @@
           ],
           "selected_count": 1,
           "omitted_count": 0,
-          "aggregate_characters": 48,
+          "aggregate_characters": 47,
           "max_aggregate_characters": 128000,
           "selected": [
             {
               "kind": "instruction",
               "key": "AGENTS.md",
               "source": "AGENTS.md",
-              "digest": "48087ed59054b388bbd57003f11a8b8dd23087465fca0576f0f979548dc972a5",
+              "digest": "da99eaa9122ddf4e7cb672ce5908924916161d93caa0d507d37bef6492c8fe19",
               "applicable_subtree": ".",
               "selection_reason": "root_ancestor",
               "authority": "repository_guidance",
-              "character_count": 48
+              "character_count": 47
             }
           ],
           "skill_catalog": [],
@@ -2546,7 +2546,7 @@
           "omitted": []
         },
         "window": {
-          "estimated_characters": 920,
+          "estimated_characters": 918,
           "max_characters": 28000,
           "retained_turns": 1,
           "omitted_turns": 0,
@@ -2569,7 +2569,7 @@
           "repository_instruction_budget": 8000,
           "repository_catalog_budget": 4000,
           "repository_body_budget": 16000,
-          "repository_instruction_used_characters": 435,
+          "repository_instruction_used_characters": 433,
           "repository_catalog_used_characters": 0,
           "repository_body_used_characters": 0,
           "repository_selected": [
@@ -2577,10 +2577,10 @@
               "kind": "instruction",
               "key": "AGENTS.md",
               "source": "AGENTS.md",
-              "digest": "48087ed59054b388bbd57003f11a8b8dd23087465fca0576f0f979548dc972a5",
+              "digest": "da99eaa9122ddf4e7cb672ce5908924916161d93caa0d507d37bef6492c8fe19",
               "selection_reason": "root_ancestor",
               "authority": "repository_guidance",
-              "character_count": 48
+              "character_count": 47
             }
           ],
           "repository_omitted": []
@@ -2700,5 +2700,5 @@
       }
     }
   ],
-  "deterministic_fingerprint": "c0d36e802a025be6bb7dee82b7eeec0af917a1a66b42299ed69cb84a3ba40f5d"
+  "deterministic_fingerprint": "204e9085b04ef6dac86a244432e52a051b28db78565c9e120d235734b46d0002"
 }

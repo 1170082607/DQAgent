@@ -157,7 +157,7 @@
                 "arguments": {
                   "operation": "update",
                   "path": "target.txt",
-                  "expected_sha256": "5259d46a49644bf76792231ef7315b5293677c49ddd7e69d95557013e10320d4",
+                  "expected_sha256": "2c8b08da5ce60398e1f19af0e5dccc744df274b826abe585eaba68c525434806",
                   "replacements": [
                     {
                       "old": "one",
@@ -221,8 +221,8 @@
             {
               "path": "target.txt",
               "kind": "modify",
-              "before_sha256": "5259d46a49644bf76792231ef7315b5293677c49ddd7e69d95557013e10320d4",
-              "after_sha256": "140eeaa0223494102ae8f7a5fe2df425c49d226ad50b98e52989a049f624780e"
+              "before_sha256": "2c8b08da5ce60398e1f19af0e5dccc744df274b826abe585eaba68c525434806",
+              "after_sha256": "27dd8ed44a83ff94d557f9fd0412ed5a8cbca69ea04922d88c01184a07300a5a"
             }
           ],
           "forbidden_paths": [],
@@ -270,7 +270,7 @@
         },
         "fixture_consumed": true
       },
-      "fixture_digest": "9abd83fe9a5fa3c7a680c3ead467160323357c27964b37365e6662bfe54f2252"
+      "fixture_digest": "b4a240cc29603eda0a73171f0d0ea6d42334cfb9062f51e1dabe75f5c38273bb"
     },
     {
       "id": "traversal-protected-secret-denial",
@@ -470,7 +470,7 @@
                 "arguments": {
                   "operation": "update",
                   "path": "target.txt",
-                  "expected_sha256": "5259d46a49644bf76792231ef7315b5293677c49ddd7e69d95557013e10320d4",
+                  "expected_sha256": "2c8b08da5ce60398e1f19af0e5dccc744df274b826abe585eaba68c525434806",
                   "replacements": [
                     {
                       "old": "one",
@@ -491,7 +491,7 @@
                 "arguments": {
                   "operation": "update",
                   "path": "target.txt",
-                  "expected_sha256": "5259d46a49644bf76792231ef7315b5293677c49ddd7e69d95557013e10320d4",
+                  "expected_sha256": "2c8b08da5ce60398e1f19af0e5dccc744df274b826abe585eaba68c525434806",
                   "replacements": [
                     {
                       "old": "one",
@@ -581,7 +581,7 @@
         },
         "fixture_consumed": true
       },
-      "fixture_digest": "fa157c89519dd0bebcce01643f6ecc1387dad5e7543dff8d1351c575503fd19a"
+      "fixture_digest": "66361e658c24ee29d07b1f75fdb3f9ceef6bf8d4677d20c037bd42decb619e28"
     },
     {
       "id": "required-pre-hook-blocks-effect",
@@ -610,7 +610,7 @@
                 "arguments": {
                   "operation": "update",
                   "path": "target.txt",
-                  "expected_sha256": "5259d46a49644bf76792231ef7315b5293677c49ddd7e69d95557013e10320d4",
+                  "expected_sha256": "2c8b08da5ce60398e1f19af0e5dccc744df274b826abe585eaba68c525434806",
                   "replacements": [
                     {
                       "old": "one",
@@ -699,7 +699,7 @@
         },
         "fixture_consumed": true
       },
-      "fixture_digest": "9bc995fdc113b732eb8fc134e6a799e09fa693348323ed66c07916b6d291218a"
+      "fixture_digest": "cd77be2bb00f632a0b07c4d0e5ce2423b12391840a879d284863721f6bbba82a"
     },
     {
       "id": "post-hook-failure-after-visible-effect",
@@ -728,7 +728,7 @@
                 "arguments": {
                   "operation": "update",
                   "path": "target.txt",
-                  "expected_sha256": "5259d46a49644bf76792231ef7315b5293677c49ddd7e69d95557013e10320d4",
+                  "expected_sha256": "2c8b08da5ce60398e1f19af0e5dccc744df274b826abe585eaba68c525434806",
                   "replacements": [
                     {
                       "old": "one",
@@ -793,8 +793,8 @@
             {
               "path": "target.txt",
               "kind": "modify",
-              "before_sha256": "5259d46a49644bf76792231ef7315b5293677c49ddd7e69d95557013e10320d4",
-              "after_sha256": "140eeaa0223494102ae8f7a5fe2df425c49d226ad50b98e52989a049f624780e"
+              "before_sha256": "2c8b08da5ce60398e1f19af0e5dccc744df274b826abe585eaba68c525434806",
+              "after_sha256": "27dd8ed44a83ff94d557f9fd0412ed5a8cbca69ea04922d88c01184a07300a5a"
             }
           ],
           "forbidden_paths": [],
@@ -846,7 +846,7 @@
         },
         "fixture_consumed": true
       },
-      "fixture_digest": "db7ae135959068e2690e3d38f8e3c9837db924781f4a66b29909b4f0566af80a"
+      "fixture_digest": "0b822c6ad1a69eec955de40a677ed8f86c232c40d58dfd7314526364c4522458"
     },
     {
       "id": "command-nonzero-output-limit-timeout-cleanup",
@@ -1054,7 +1054,7 @@
                 "arguments": {
                   "operation": "update",
                   "path": "target.txt",
-                  "expected_sha256": "5259d46a49644bf76792231ef7315b5293677c49ddd7e69d95557013e10320d4",
+                  "expected_sha256": "2c8b08da5ce60398e1f19af0e5dccc744df274b826abe585eaba68c525434806",
                   "replacements": [
                     {
                       "old": "one",
@@ -1118,8 +1118,8 @@
             {
               "path": "target.txt",
               "kind": "modify",
-              "before_sha256": "5259d46a49644bf76792231ef7315b5293677c49ddd7e69d95557013e10320d4",
-              "after_sha256": "140eeaa0223494102ae8f7a5fe2df425c49d226ad50b98e52989a049f624780e"
+              "before_sha256": "2c8b08da5ce60398e1f19af0e5dccc744df274b826abe585eaba68c525434806",
+              "after_sha256": "27dd8ed44a83ff94d557f9fd0412ed5a8cbca69ea04922d88c01184a07300a5a"
             }
           ],
           "forbidden_paths": [],
@@ -1167,7 +1167,7 @@
         },
         "fixture_consumed": true
       },
-      "fixture_digest": "53d3e94fd904e01a15e1eed7de303ed50632543fa76ed059c2caea148a86fa0c"
+      "fixture_digest": "de062801d10d0fed0cf67a8c50d4a169f2200fe62413d52180bb4e27460df3d3"
     },
     {
       "id": "nested-hostile-guidance-explicit-skill-omission",

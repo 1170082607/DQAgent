@@ -608,7 +608,9 @@ Deterministic mode replaces only model completions, approval decisions, and purp
 fixtures. It uses real workspace resolution, governance, tools, subprocess adapter, context
 projection, application orchestration, diff, and validators. Reports are bounded and credential-free.
 A deterministic baseline proves regression behavior in controlled fixtures, not safety against an
-arbitrary hostile repository or live-model coding quality.
+arbitrary hostile repository or live-model coding quality. Fixture files are written as declared
+UTF-8 bytes without platform newline conversion, keeping fixture digests stable across operating
+systems.
 
 The representative production-path suite should contain approximately 8-10 cases:
 

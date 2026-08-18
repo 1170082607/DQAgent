@@ -285,6 +285,21 @@ def test_t14_fixture_allows_files_inside_a_skill_root() -> None:
     assert fixture.skill_roots == {"python": "skills/python"}
 
 
+def test_t14_fixture_materialization_preserves_declared_utf8_bytes() -> None:
+    from dqagent import coding_evaluation as coding_evaluation_module
+
+    case = next(
+        item
+        for item in load_coding_evaluation_suite(SUITE_PATH).cases
+        if item.case_id == "approved-single-file-edit-validator-pass"
+    )
+    repository = coding_evaluation_module._DisposableRepository(case)
+    try:
+        assert (repository.root / "target.txt").read_bytes() == b"one\n"
+    finally:
+        repository.cleanup()
+
+
 def test_t14_fixture_iterables_fail_closed_at_bound_plus_one() -> None:
     class InfiniteValues:
         def __init__(self, prefix: str, sentinel_after: int) -> None:

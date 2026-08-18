@@ -1067,7 +1067,7 @@ class _DisposableRepository:
         for raw_path, content in repository.files.items():
             target = self.root.joinpath(*PurePosixPath(raw_path).parts)
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(content, encoding="utf-8")
+            target.write_bytes(content.encode("utf-8"))
         for raw_root in repository.skill_roots.values():
             self.root.joinpath(*PurePosixPath(raw_root).parts).mkdir(parents=True, exist_ok=True)
 
