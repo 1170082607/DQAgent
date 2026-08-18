@@ -15,8 +15,8 @@ from dqagent.coding_evaluation import (
 )
 from dqagent.errors import DQAgentError
 
-DEFAULT_SUITE = Path("evaluations/cases/phase-9-coding-smoke-v1.json")
-DEFAULT_OUTPUT = Path(".local/evaluations/phase-9-coding-deterministic-report.json")
+DEFAULT_SUITE = Path("evaluations/cases/phase-9-coding-baseline-v1.json")
+DEFAULT_OUTPUT = Path(".local/evaluations/phase-9-coding-baseline-report.json")
 
 
 def build_parser() -> argparse.ArgumentParser:

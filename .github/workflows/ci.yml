@@ -33,6 +33,10 @@ jobs:
             --output retrieval-evaluation-report.json
           dqagent-memory-eval \
             --output memory-evaluation-report.json
+          dqagent-coding-eval \
+            --mode deterministic \
+            --suite evaluations/cases/phase-9-coding-baseline-v1.json \
+            --output phase-9-coding-evaluation-report.json
 
       - name: Upload evaluation report
         if: always()
@@ -44,4 +48,5 @@ jobs:
             context-evaluation-report.json
             retrieval-evaluation-report.json
             memory-evaluation-report.json
+            phase-9-coding-evaluation-report.json
           retention-days: 30

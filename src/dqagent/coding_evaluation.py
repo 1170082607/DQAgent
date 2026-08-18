@@ -13,7 +13,7 @@ import json
 import sys
 import tempfile
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
@@ -38,15 +38,26 @@ from dqagent.models import (
     TokenUsage,
     ToolCall,
     ToolDefinition,
+    ToolErrorCode,
+    ToolOutcome,
+    ToolResult,
 )
 from dqagent.tool_governance import (
     HARD_GUARD_ORDER,
     ActionKind,
     ActionRecord,
+    ApprovalDecision,
     ApprovalOutcome,
     DefaultActionPolicy,
     EffectState,
+    HookMode,
+    HookOutcome,
+    HookResult,
     PolicyOutcome,
+    PostActionHookInput,
+    PreActionHook,
+    PreActionHookInput,
+    PreActionHookSpec,
     ScriptedApprovalProvider,
 )
 from dqagent.validators import (
@@ -54,7 +65,15 @@ from dqagent.validators import (
     ValidatorResult,
     ValidatorStatus,
 )
-from dqagent.workspace import Workspace, WorkspaceChange, WorkspaceChangeKind, WorkspaceScope
+from dqagent.workspace import (
+    Workspace,
+    WorkspaceChange,
+    WorkspaceChangeKind,
+    WorkspaceDiff,
+    WorkspaceObserver,
+    WorkspaceScope,
+    WorkspaceSnapshot,
+)
 
 __all__ = [
     "CODING_EVALUATION_REPORT_SCHEMA_VERSION",
@@ -64,6 +83,7 @@ __all__ = [
     "CodingEvaluationCheck",
     "CodingEvaluationChangeExpectation",
     "CodingEvaluationComposition",
+    "CodingEvaluationContextExpectation",
     "CodingEvaluationDefinitionError",
     "CodingEvaluationDiffExpectation",
     "CodingEvaluationExpected",
@@ -72,6 +92,7 @@ __all__ = [
     "CodingEvaluationMode",
     "CodingEvaluationReport",
     "CodingEvaluationRunner",
+    "CodingEvaluationToolCallExpectation",
     "CodingEvaluationSuite",
     "CodingEvaluationValidatorFixture",
     "CodingEvaluationValidatorExpectation",
@@ -92,6 +113,7 @@ _MAX_APPROVAL_DECISIONS = 64
 _MAX_VALIDATORS = 32
 _MAX_EXPECTED_CHANGES = 128
 _MAX_EXPECTED_GOVERNANCE = 128
+_MAX_EXPECTED_TOOL_CALLS = 128
 _MAX_EXPECTED_CHECKS = 256
 _MAX_REPORT_TEXT = 8_192
 _MAX_REPORT_DIFF = 32_000
@@ -99,6 +121,14 @@ _MAX_REPORT_VALIDATOR_OUTPUT = 4_096
 _MAX_REPORT_LIMITATIONS = 32
 _MAX_REPORT_LIMITATION_TEXT = 256
 _MAX_REPORT_CHARACTERS = 1_000_000
+_MAX_FIXTURE_PATHS = 32
+_MAX_FIXTURE_PATH_CHARACTERS = 16_384
+_MAX_SECRET_NAMES = 64
+_MAX_SECRET_VALUES = 64
+_MAX_SECRET_NAMES_CHARACTERS = 4_096
+_MAX_SECRET_VALUES_CHARACTERS = 16_384
+_MAX_RAW_JSON_ITEMS = _MAX_EXPECTED_CHECKS
+_MAX_RAW_JSON_DEPTH = 16
 
 
 class CodingEvaluationDefinitionError(DQAgentError):
@@ -121,6 +151,46 @@ def _bounded_text(value: object, label: str, maximum: int) -> str:
     return value
 
 
+def _validate_raw_json_case(value: object, label: str = "case", depth: int = 0) -> None:
+    if depth > _MAX_RAW_JSON_DEPTH:
+        raise ValueError(f"{label} exceeds its nesting bound")
+    if type(value) is dict:
+        if len(value) > _MAX_RAW_JSON_ITEMS:
+            raise ValueError(f"{label} object exceeds its bound")
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise TypeError(f"{label} object keys must be strings")
+            _validate_raw_json_case(item, f"{label}.{key}", depth + 1)
+        return
+    if type(value) is list:
+        if len(value) > _MAX_RAW_JSON_ITEMS:
+            raise ValueError(f"{label} array exceeds its bound")
+        for index, item in enumerate(value):
+            _validate_raw_json_case(item, f"{label}[{index}]", depth + 1)
+        return
+    if value is None or type(value) in {bool, float, int, str}:
+        return
+    raise TypeError(f"{label} must use JSON-native containers")
+
+
+def _bounded_raw_array(value: object, label: str, maximum: int) -> list[object]:
+    if type(value) is not list:
+        raise TypeError(f"{label} must be a JSON array")
+    if len(value) > maximum:
+        raise ValueError(f"{label} exceeds its bound ({maximum})")
+    return value
+
+
+def _bounded_raw_mapping(value: object, label: str, maximum: int) -> dict[str, object]:
+    if type(value) is not dict:
+        raise TypeError(f"{label} must be a JSON object")
+    if len(value) > maximum:
+        raise ValueError(f"{label} exceeds its bound ({maximum})")
+    if any(not isinstance(key, str) for key in value):
+        raise TypeError(f"{label} object keys must be strings")
+    return value
+
+
 def _relative_path(value: object, label: str, *, allow_root: bool = False) -> PurePosixPath:
     if not isinstance(value, str) or not value:
         raise ValueError(f"{label} must be a relative POSIX path")
@@ -140,31 +210,104 @@ def _relative_path(value: object, label: str, *, allow_root: bool = False) -> Pu
     return PurePosixPath(*parts)
 
 
+def _portable_path_parts(path: str | PurePosixPath) -> tuple[str, ...]:
+    normalized = PurePosixPath(path).as_posix()
+    if normalized == ".":
+        return ()
+    return tuple(part.casefold() for part in PurePosixPath(normalized).parts)
+
+
+def _is_strict_path_prefix(parent: tuple[str, ...], child: tuple[str, ...]) -> bool:
+    return len(parent) < len(child) and child[: len(parent)] == parent
+
+
+def _validate_portable_fixture_identity(
+    files: Mapping[str, str],
+    skill_roots: Mapping[str, str],
+) -> None:
+    file_entries = [
+        (_portable_path_parts(path), path)
+        for path in files
+    ]
+    for index, (path_parts, path) in enumerate(file_entries):
+        for other_parts, other_path in file_entries[index + 1 :]:
+            if (
+                path_parts == other_parts
+                or _is_strict_path_prefix(path_parts, other_parts)
+                or _is_strict_path_prefix(other_parts, path_parts)
+            ):
+                raise ValueError(
+                    "portable fixture path collision between "
+                    f"{path!r} and {other_path!r}"
+                )
+
+    root_entries = [
+        (_portable_path_parts(path), path)
+        for path in skill_roots.values()
+    ]
+    for index, (path_parts, path) in enumerate(root_entries):
+        for other_parts, other_path in root_entries[index + 1 :]:
+            if path_parts == other_parts:
+                raise ValueError(
+                    "portable fixture path collision between skill roots "
+                    f"{path!r} and {other_path!r}"
+                )
+        for file_parts, file_path in file_entries:
+            if path_parts == file_parts or _is_strict_path_prefix(file_parts, path_parts):
+                raise ValueError(
+                    "portable fixture path collision between file "
+                    f"{file_path!r} and skill root {path!r}"
+                )
+
+
 def _normalize_path_tuple(
     values: Iterable[str | PurePosixPath],
     label: str,
     *,
     allow_root: bool = False,
+    max_items: int = _MAX_FIXTURE_PATHS,
+    aggregate_maximum: int = _MAX_FIXTURE_PATH_CHARACTERS,
 ) -> tuple[PurePosixPath, ...]:
     if isinstance(values, (str, bytes)):
         raise TypeError(f"{label} must be an iterable")
     normalized: list[PurePosixPath] = []
+    seen: set[PurePosixPath] = set()
     try:
         iterator = iter(values)
     except TypeError as error:
         raise TypeError(f"{label} must be an iterable") from error
-    for value in iterator:
+    aggregate_characters = 0
+    for index in range(max_items + 1):
+        try:
+            value = next(iterator)
+        except StopIteration:
+            break
+        except TypeError as error:
+            raise TypeError(f"{label} must be an iterable") from error
+        if index >= max_items:
+            raise ValueError(f"{label} exceeds its bound")
         path = _relative_path(
             value.as_posix() if isinstance(value, PurePosixPath) else value,
             label,
             allow_root=allow_root,
         )
-        if path not in normalized:
+        aggregate_characters += len(path.as_posix())
+        if aggregate_characters > aggregate_maximum:
+            raise ValueError(f"{label} character budget exceeded")
+        if path not in seen:
             normalized.append(path)
+            seen.add(path)
     return tuple(normalized)
 
 
-def _normalize_string_tuple(values: Iterable[str], label: str, maximum: int) -> tuple[str, ...]:
+def _normalize_string_tuple(
+    values: Iterable[str],
+    label: str,
+    maximum: int,
+    *,
+    max_items: int,
+    aggregate_maximum: int,
+) -> tuple[str, ...]:
     if isinstance(values, (str, bytes)):
         raise TypeError(f"{label} must be an iterable")
     try:
@@ -172,10 +315,24 @@ def _normalize_string_tuple(values: Iterable[str], label: str, maximum: int) -> 
     except TypeError as error:
         raise TypeError(f"{label} must be an iterable") from error
     normalized: list[str] = []
-    for value in iterator:
+    seen: set[str] = set()
+    aggregate_characters = 0
+    for index in range(max_items + 1):
+        try:
+            value = next(iterator)
+        except StopIteration:
+            break
+        except TypeError as error:
+            raise TypeError(f"{label} must be an iterable") from error
+        if index >= max_items:
+            raise ValueError(f"{label} exceeds item bound")
         text = _bounded_text(value, label, maximum)
-        if text not in normalized:
+        aggregate_characters += len(text)
+        if aggregate_characters > aggregate_maximum:
+            raise ValueError(f"{label} character budget exceeded")
+        if text not in seen:
             normalized.append(text)
+            seen.add(text)
     return tuple(normalized)
 
 
@@ -210,6 +367,7 @@ class CodingRepositoryFixture:
             normalized_key = _bounded_text(key, "skill root identity", 64)
             normalized_root = _relative_path(raw_path, "skill root path", allow_root=True)
             normalized_roots[normalized_key] = normalized_root.as_posix()
+        _validate_portable_fixture_identity(normalized_files, normalized_roots)
         object.__setattr__(self, "files", dict(sorted(normalized_files.items())))
         object.__setattr__(self, "skill_roots", dict(sorted(normalized_roots.items())))
         for name in (
@@ -221,7 +379,12 @@ class CodingRepositoryFixture:
             object.__setattr__(
                 self,
                 name,
-                _normalize_path_tuple(getattr(self, name), f"fixture {name}"),
+                _normalize_path_tuple(
+                    getattr(self, name),
+                    f"fixture {name}",
+                    max_items=_MAX_FIXTURE_PATHS,
+                    aggregate_maximum=_MAX_FIXTURE_PATH_CHARACTERS,
+                ),
             )
 
 
@@ -280,10 +443,17 @@ class CodingEvaluationComposition:
     max_governed_calls: int = 1
     secret_names: tuple[str, ...] = ()
     secret_values: tuple[str, ...] = ()
+    hook_fixture: str = "none"
 
     def __post_init__(self) -> None:
         if self.policy != "default":
             raise ValueError("coding evaluation only supports the default policy fixture")
+        if self.hook_fixture not in {
+            "none",
+            "required_pre_hook_failure",
+            "post_hook_failure",
+        }:
+            raise ValueError("unsupported coding evaluation hook fixture")
         if not isinstance(self.executable_allowlist, Mapping) or len(self.executable_allowlist) > 8:
             raise ValueError("executable fixture is malformed or unbounded")
         normalized_executables: dict[str, str] = {}
@@ -313,10 +483,26 @@ class CodingEvaluationComposition:
             self, "executable_allowlist", dict(sorted(normalized_executables.items()))
         )
         object.__setattr__(
-            self, "secret_names", _normalize_string_tuple(self.secret_names, "secret names", 128)
+            self,
+            "secret_names",
+            _normalize_string_tuple(
+                self.secret_names,
+                "secret names",
+                128,
+                max_items=_MAX_SECRET_NAMES,
+                aggregate_maximum=_MAX_SECRET_NAMES_CHARACTERS,
+            ),
         )
         object.__setattr__(
-            self, "secret_values", _normalize_string_tuple(self.secret_values, "secret values", 512)
+            self,
+            "secret_values",
+            _normalize_string_tuple(
+                self.secret_values,
+                "secret values",
+                512,
+                max_items=_MAX_SECRET_VALUES,
+                aggregate_maximum=_MAX_SECRET_VALUES_CHARACTERS,
+            ),
         )
 
 
@@ -333,7 +519,14 @@ class CodingEvaluationFixture:
             raise ValueError("model completion fixture is empty or unbounded")
         if len(self.approval_decisions) > _MAX_APPROVAL_DECISIONS:
             raise ValueError("approval fixture is unbounded")
-        allowed = {"none", "validator_runner_error", "validator_runner_empty", "cleanup_failure"}
+        allowed = {
+            "none",
+            "validator_runner_error",
+            "validator_runner_empty",
+            "cleanup_failure",
+            "reject_then_stale_approval",
+            "incomplete_observation",
+        }
         if self.failure not in allowed:
             raise ValueError("unsupported coding evaluation failure fixture")
 
@@ -398,10 +591,62 @@ class CodingEvaluationGovernanceExpectation:
     effect_state: EffectState
     executor_attempts: int
     guards_passed: bool
+    pre_hook_outcomes: tuple[HookOutcome, ...] = ()
+    post_hook_outcomes: tuple[HookOutcome, ...] = ()
+    diagnostics_contains_all: tuple[str, ...] = ()
+    diagnostics_absent_all: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.executor_attempts not in {0, 1}:
             raise ValueError("expected executor attempts must be zero or one")
+
+
+@dataclass(frozen=True, slots=True)
+class CodingEvaluationToolCallExpectation:
+    """A bounded provider-neutral call and result expectation."""
+
+    call_id: str
+    name: str
+    arguments: Mapping[str, object]
+    outcome: ToolOutcome
+    error_code: ToolErrorCode | None = None
+
+    def __post_init__(self) -> None:
+        _bounded_text(self.call_id, "expected tool call ID", 128)
+        _bounded_text(self.name, "expected tool name", 128)
+        if not isinstance(self.arguments, Mapping):
+            raise TypeError("expected tool call arguments must be a mapping")
+        if self.outcome is ToolOutcome.ERROR and self.error_code is None:
+            raise ValueError("expected tool errors must include an error code")
+        if self.outcome is ToolOutcome.SUCCESS and self.error_code is not None:
+            raise ValueError("expected successful tools must not include an error code")
+        object.__setattr__(self, "arguments", dict(self.arguments))
+
+
+@dataclass(frozen=True, slots=True)
+class CodingEvaluationContextExpectation:
+    """Content-free repository/context predicates for representative cases."""
+
+    selected_instruction_sources: tuple[str, ...] = ()
+    selected_skill_key: str | None = None
+    selected_skill_body: bool | None = None
+    omission_reasons: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        for label, values in (
+            ("selected instruction sources", self.selected_instruction_sources),
+            ("context omission reasons", self.omission_reasons),
+        ):
+            if not isinstance(values, tuple) or any(
+                not isinstance(value, str) or not value.strip() for value in values
+            ):
+                raise ValueError(f"{label} must contain non-empty strings")
+        if self.selected_skill_key is not None and (
+            not isinstance(self.selected_skill_key, str) or not self.selected_skill_key.strip()
+        ):
+            raise ValueError("selected skill key must be non-empty text or None")
+        if self.selected_skill_body is not None and not isinstance(self.selected_skill_body, bool):
+            raise TypeError("selected skill body expectation must be a boolean or None")
 
 
 @dataclass(frozen=True, slots=True)
@@ -438,9 +683,13 @@ class CodingEvaluationExpected:
     governance: tuple[CodingEvaluationGovernanceExpectation, ...]
     required_event_types: tuple[RunEventType, ...]
     limits: CodingEvaluationLimits
+    context: CodingEvaluationContextExpectation = field(
+        default_factory=CodingEvaluationContextExpectation
+    )
     error_type: str | None = None
     error_category: str | None = None
     fixture_consumed: bool = True
+    tool_calls: tuple[CodingEvaluationToolCallExpectation, ...] = ()
 
     def __post_init__(self) -> None:
         if self.run_status not in {"completed", "error"}:
@@ -450,8 +699,12 @@ class CodingEvaluationExpected:
         if (
             len(self.validators) > _MAX_VALIDATORS
             or len(self.governance) > _MAX_EXPECTED_GOVERNANCE
+            or len(self.tool_calls) > _MAX_EXPECTED_TOOL_CALLS
         ):
-            raise ValueError("expected validator or governance trajectory is unbounded")
+            raise ValueError("expected validator, governance, or tool trajectory is unbounded")
+        tool_call_ids = [item.call_id for item in self.tool_calls]
+        if len(tool_call_ids) != len(set(tool_call_ids)):
+            raise ValueError("expected tool call IDs must be unique")
 
 
 @dataclass(frozen=True, slots=True)
@@ -515,10 +768,12 @@ class CodingEvaluationCaseResult:
     verdict: str | None
     output: str | None
     checks: tuple[CodingEvaluationCheck, ...]
+    tool_calls: tuple[Mapping[str, object], ...] = ()
     changed_paths: tuple[str, ...] = ()
     diff: Mapping[str, object] = field(default_factory=dict)
     validators: tuple[Mapping[str, object], ...] = ()
     governance: tuple[Mapping[str, object], ...] = ()
+    context: Mapping[str, object] = field(default_factory=dict)
     observation_limitations: tuple[str, ...] = ()
     error: str | None = None
     cleanup_error: str | None = None
@@ -527,6 +782,10 @@ class CodingEvaluationCaseResult:
         _bounded_text(self.case_id, "evaluation result case ID", 128)
         if len(self.checks) > _MAX_EXPECTED_CHECKS:
             raise ValueError("evaluation checks are unbounded")
+        if not isinstance(self.tool_calls, tuple) or len(self.tool_calls) > (
+            _MAX_EXPECTED_TOOL_CALLS
+        ):
+            raise ValueError("evaluation tool-call evidence is unbounded")
         if not isinstance(self.observation_limitations, tuple) or len(
             self.observation_limitations
         ) > _MAX_REPORT_LIMITATIONS:
@@ -535,7 +794,7 @@ class CodingEvaluationCaseResult:
             _bounded_text(value, "evaluation observation limitation", _MAX_REPORT_LIMITATION_TEXT)
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        result: dict[str, object] = {
             "case_id": self.case_id,
             "passed": self.passed,
             "evaluation_passed": self.evaluation_passed,
@@ -549,6 +808,7 @@ class CodingEvaluationCaseResult:
             "diff": dict(self.diff),
             "validators": [dict(value) for value in self.validators],
             "governance": [dict(value) for value in self.governance],
+            "context": dict(self.context),
             "observation_limitations": list(self.observation_limitations),
             "checks": [
                 {"name": check.name, "passed": check.passed, "detail": check.detail}
@@ -560,6 +820,9 @@ class CodingEvaluationCaseResult:
                 "error": self.cleanup_error,
             },
         }
+        if self.tool_calls:
+            result["tool_calls"] = [dict(value) for value in self.tool_calls]
+        return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -669,6 +932,72 @@ class _FailureValidatorRunner:
         raise RuntimeError("coding evaluation validator failure fixture")
 
 
+class _FixtureHook:
+    def __init__(self, identity: str, outcome: HookOutcome, reason: str) -> None:
+        self._identity = identity
+        self._outcome = outcome
+        self._reason = reason
+
+    @property
+    def identity(self) -> str:
+        return self._identity
+
+    def __call__(self, input_value: PreActionHookInput | PostActionHookInput) -> HookResult:
+        del input_value
+        return HookResult(
+            outcome=self._outcome,
+            reason=self._reason,
+            hook_identity=self._identity,
+        )
+
+
+class _IncompleteObservationObserver:
+    """Production observer adapter that exposes one bounded incomplete fixture."""
+
+    def __init__(self, workspace: Workspace) -> None:
+        self.workspace = workspace
+        self._delegate = WorkspaceObserver(workspace)
+
+    def capture_baseline(
+        self,
+        *,
+        target_paths: Iterable[str | PurePosixPath] = (),
+        cancel: object | None = None,
+    ) -> WorkspaceSnapshot:
+        return self._delegate.capture_baseline(target_paths=target_paths, cancel=cancel)
+
+    def capture_final(
+        self,
+        *,
+        target_paths: Iterable[str | PurePosixPath] = (),
+        cancel: object | None = None,
+    ) -> WorkspaceSnapshot:
+        snapshot = self._delegate.capture_final(target_paths=target_paths, cancel=cancel)
+        return replace(
+            snapshot,
+            completeness=replace(snapshot.completeness, target_complete=False),
+        )
+
+    def diff(
+        self,
+        baseline: WorkspaceSnapshot,
+        final: WorkspaceSnapshot,
+        *,
+        target_paths: Iterable[str | PurePosixPath] = (),
+        forbidden_paths: Iterable[str | PurePosixPath] = (),
+    ) -> WorkspaceDiff:
+        diff = self._delegate.diff(
+            baseline,
+            final,
+            target_paths=target_paths,
+            forbidden_paths=forbidden_paths,
+        )
+        return replace(
+            diff,
+            completeness=replace(diff.completeness, target_complete=False),
+        )
+
+
 class _DisposableRepository:
     def __init__(self, case: CodingEvaluationCase) -> None:
         self._case = case
@@ -728,7 +1057,29 @@ def _request_digest_payload(request: CodingRequest) -> Mapping[str, object]:
 
 
 def _expected_digest_payload(expected: CodingEvaluationExpected) -> Mapping[str, object]:
-    return {
+    governance: list[dict[str, object]] = []
+    for item in expected.governance:
+        value: dict[str, object] = {
+            "action_kind": item.action_kind.value,
+            "policy_outcome": item.policy_outcome.value,
+            "approval_outcome": (
+                None if item.approval_outcome is None else item.approval_outcome.value
+            ),
+            "effect_state": item.effect_state.value,
+            "executor_attempts": item.executor_attempts,
+            "guards_passed": item.guards_passed,
+        }
+        if item.pre_hook_outcomes:
+            value["pre_hook_outcomes"] = [outcome.value for outcome in item.pre_hook_outcomes]
+        if item.post_hook_outcomes:
+            value["post_hook_outcomes"] = [outcome.value for outcome in item.post_hook_outcomes]
+        if item.diagnostics_contains_all:
+            value["diagnostics_contains_all"] = list(item.diagnostics_contains_all)
+        if item.diagnostics_absent_all:
+            value["diagnostics_absent_all"] = list(item.diagnostics_absent_all)
+        governance.append(value)
+
+    payload: dict[str, object] = {
         "run": {
             "status": expected.run_status,
             "error_type": expected.error_type,
@@ -759,19 +1110,7 @@ def _expected_digest_payload(expected: CodingEvaluationExpected) -> Mapping[str,
         "validators": [
             {"id": item.validator_id, "status": item.status.value} for item in expected.validators
         ],
-        "governance": [
-            {
-                "action_kind": item.action_kind.value,
-                "policy_outcome": item.policy_outcome.value,
-                "approval_outcome": (
-                    None if item.approval_outcome is None else item.approval_outcome.value
-                ),
-                "effect_state": item.effect_state.value,
-                "executor_attempts": item.executor_attempts,
-                "guards_passed": item.guards_passed,
-            }
-            for item in expected.governance
-        ],
+        "governance": governance,
         "required_event_types": [item.value for item in expected.required_event_types],
         "limits": {
             "max_model_attempts": expected.limits.max_model_attempts,
@@ -782,22 +1121,133 @@ def _expected_digest_payload(expected: CodingEvaluationExpected) -> Mapping[str,
         },
         "fixture_consumed": expected.fixture_consumed,
     }
+    if (
+        expected.context.selected_instruction_sources
+        or expected.context.selected_skill_key is not None
+        or expected.context.selected_skill_body is not None
+        or expected.context.omission_reasons
+    ):
+        payload["context"] = {
+            "selected_instruction_sources": list(expected.context.selected_instruction_sources),
+            "selected_skill_key": expected.context.selected_skill_key,
+            "selected_skill_body": expected.context.selected_skill_body,
+            "omission_reasons": list(expected.context.omission_reasons),
+        }
+    if expected.tool_calls:
+        payload["tool_calls"] = [
+            {
+                "call_id": item.call_id,
+                "name": item.name,
+                "arguments": dict(item.arguments),
+                "outcome": item.outcome.value,
+                "error_code": None if item.error_code is None else item.error_code.value,
+            }
+            for item in expected.tool_calls
+        ]
+    return payload
 
 
 def compute_coding_fixture_digest(case_data: Mapping[str, object]) -> str:
-    """Hash the repository, reviewed case definition, and trusted deterministic inputs."""
+    """Hash a bounded JSON-native case definition and trusted deterministic inputs."""
 
+    _validate_raw_json_case(case_data)
     raw_case = case_data
     raw_request = cast(Mapping[str, Any], raw_case.get("request", {}))
     raw_repository = cast(Mapping[str, Any], case_data.get("repository", {}))
     raw_fixture = cast(Mapping[str, Any], case_data.get("fixture", {}))
     raw_composition = cast(Mapping[str, Any], case_data.get("composition", {}))
+    raw_targets = _bounded_raw_array(raw_request["targets"], "request targets", 128)
+    raw_skills = _bounded_raw_array(raw_request.get("skills", []), "request skills", 32)
+    raw_executable_allowlist = _bounded_raw_mapping(
+        raw_composition.get("executable_allowlist", {}),
+        "executable fixture",
+        8,
+    )
+    raw_validators = _bounded_raw_array(
+        raw_composition.get("validators", []),
+        "validator fixtures",
+        _MAX_VALIDATORS,
+    )
+    raw_secret_names = _bounded_raw_array(
+        raw_composition.get("secret_names", []),
+        "secret names",
+        _MAX_SECRET_NAMES,
+    )
+    raw_secret_values = _bounded_raw_array(
+        raw_composition.get("secret_values", []),
+        "secret values",
+        _MAX_SECRET_VALUES,
+    )
+    raw_files = _bounded_raw_mapping(
+        raw_repository.get("files", {}),
+        "fixture files",
+        _MAX_FILES,
+    )
+    raw_skill_roots = _bounded_raw_mapping(
+        raw_repository.get("skill_roots", {}),
+        "skill roots",
+        16,
+    )
+    raw_protected_paths = _bounded_raw_array(
+        raw_repository.get("protected_paths", []),
+        "protected fixture paths",
+        _MAX_FIXTURE_PATHS,
+    )
+    raw_secret_paths = _bounded_raw_array(
+        raw_repository.get("secret_paths", []),
+        "secret fixture paths",
+        _MAX_FIXTURE_PATHS,
+    )
+    raw_volatile_paths = _bounded_raw_array(
+        raw_repository.get("volatile_paths", []),
+        "volatile fixture paths",
+        _MAX_FIXTURE_PATHS,
+    )
+    raw_ignored_paths = _bounded_raw_array(
+        raw_repository.get("ignored_paths", []),
+        "ignored fixture paths",
+        _MAX_FIXTURE_PATHS,
+    )
+    raw_completions = _bounded_raw_array(
+        raw_fixture.get("model_completions", []),
+        "model completion fixtures",
+        _MAX_COMPLETIONS,
+    )
+    raw_approval_decisions = _bounded_raw_array(
+        raw_fixture.get("approval_decisions", []),
+        "approval fixtures",
+        _MAX_APPROVAL_DECISIONS,
+    )
     request = CodingRequest(
         cast(str, raw_request["message"]),
-        tuple(cast(Sequence[str | PurePosixPath], raw_request["targets"])),
-        tuple(cast(Sequence[str], raw_request.get("skills", []))),
+        tuple(cast(Sequence[str | PurePosixPath], raw_targets)),
+        tuple(cast(Sequence[str], raw_skills)),
     )
     expected = _parse_expected(cast(Mapping[str, Any], raw_case["expected"]))
+    composition = {
+        "policy": raw_composition.get("policy", "default"),
+        "executable_allowlist": dict(cast(Mapping[str, str], raw_executable_allowlist)),
+        "validators": [
+            {
+                "id": item["id"],
+                "argv": list(item["argv"]),
+                "cwd": item.get("cwd", "."),
+                "timeout_seconds": float(item.get("timeout_seconds", 5.0)),
+                "stdout_limit_bytes": int(item.get("stdout_limit_bytes", 4_096)),
+                "stderr_limit_bytes": int(item.get("stderr_limit_bytes", 4_096)),
+                "accepted_exit_codes": list(item.get("accepted_exit_codes", [0])),
+            }
+            for item in cast(list[dict[str, Any]], raw_validators)
+        ],
+        "max_iterations": int(raw_composition.get("max_iterations", 8)),
+        "max_governed_calls": int(raw_composition.get("max_governed_calls", 1)),
+        "secret_names": list(raw_secret_names),
+        "secret_values": list(raw_secret_values),
+    }
+    hook_fixture = raw_composition.get("hook_fixture", "none")
+    if hook_fixture != "none":
+        composition["hook_fixture"] = hook_fixture
+
     selected = {
         "case": {
             "id": raw_case.get("id"),
@@ -805,12 +1255,12 @@ def compute_coding_fixture_digest(case_data: Mapping[str, object]) -> str:
         },
         "request": _request_digest_payload(request),
         "repository": {
-            "files": dict(cast(Mapping[str, str], raw_repository.get("files", {}))),
-            "skill_roots": dict(cast(Mapping[str, str], raw_repository.get("skill_roots", {}))),
-            "protected_paths": list(raw_repository.get("protected_paths", [])),
-            "secret_paths": list(raw_repository.get("secret_paths", [])),
-            "volatile_paths": list(raw_repository.get("volatile_paths", [])),
-            "ignored_paths": list(raw_repository.get("ignored_paths", [])),
+            "files": dict(cast(Mapping[str, str], raw_files)),
+            "skill_roots": dict(cast(Mapping[str, str], raw_skill_roots)),
+            "protected_paths": list(raw_protected_paths),
+            "secret_paths": list(raw_secret_paths),
+            "volatile_paths": list(raw_volatile_paths),
+            "ignored_paths": list(raw_ignored_paths),
         },
         "fixture": {
             "model_completions": [
@@ -828,33 +1278,12 @@ def compute_coding_fixture_digest(case_data: Mapping[str, object]) -> str:
                     "model": item.get("model"),
                     "usage": item.get("usage"),
                 }
-                for item in cast(list[dict[str, Any]], raw_fixture.get("model_completions", []))
+                for item in cast(list[dict[str, Any]], raw_completions)
             ],
-            "approval_decisions": list(raw_fixture.get("approval_decisions", [])),
+            "approval_decisions": list(raw_approval_decisions),
             "failure": raw_fixture.get("failure", "none"),
         },
-        "composition": {
-            "policy": raw_composition.get("policy", "default"),
-            "executable_allowlist": dict(
-                cast(Mapping[str, str], raw_composition.get("executable_allowlist", {}))
-            ),
-            "validators": [
-                {
-                    "id": item["id"],
-                    "argv": list(item["argv"]),
-                    "cwd": item.get("cwd", "."),
-                    "timeout_seconds": float(item.get("timeout_seconds", 5.0)),
-                    "stdout_limit_bytes": int(item.get("stdout_limit_bytes", 4_096)),
-                    "stderr_limit_bytes": int(item.get("stderr_limit_bytes", 4_096)),
-                    "accepted_exit_codes": list(item.get("accepted_exit_codes", [0])),
-                }
-                for item in cast(list[dict[str, Any]], raw_composition.get("validators", []))
-            ],
-            "max_iterations": int(raw_composition.get("max_iterations", 8)),
-            "max_governed_calls": int(raw_composition.get("max_governed_calls", 1)),
-            "secret_names": list(raw_composition.get("secret_names", [])),
-            "secret_values": list(raw_composition.get("secret_values", [])),
-        },
+        "composition": composition,
         "expected": _expected_digest_payload(expected),
     }
     return hashlib.sha256(_canonical_json(selected).encode("utf-8")).hexdigest()
@@ -885,10 +1314,86 @@ def _completion_payload(completion: Completion) -> Mapping[str, object]:
     }
 
 
+def _report_tool_calls(
+    conversation: Sequence[ConversationItem],
+    *,
+    workspace: Workspace,
+    secret_values: Sequence[str],
+) -> tuple[Mapping[str, object], ...]:
+    results = {
+        item.call_id: item
+        for item in conversation
+        if isinstance(item, ToolResult)
+    }
+    payload: list[Mapping[str, object]] = []
+    for call in (
+        item for item in conversation if isinstance(item, ToolCall)
+    ):
+        raw_arguments = _safe_text(
+            call.arguments,
+            workspace=workspace,
+            secret_values=secret_values,
+            maximum=_MAX_REPORT_TEXT,
+        )
+        try:
+            arguments: object = json.loads(raw_arguments)
+        except (TypeError, json.JSONDecodeError):
+            arguments = {"parse_error": "invalid_json"}
+        result = results.get(call.call_id)
+        payload.append(
+            {
+                "call_id": _safe_text(
+                    call.call_id,
+                    workspace=workspace,
+                    secret_values=secret_values,
+                    maximum=128,
+                ),
+                "name": _safe_text(
+                    call.name,
+                    workspace=workspace,
+                    secret_values=secret_values,
+                    maximum=128,
+                ),
+                "arguments": arguments,
+                "outcome": None if result is None else result.outcome.value,
+                "error_code": (
+                    None
+                    if result is None or result.error_code is None
+                    else result.error_code.value
+                ),
+            }
+        )
+        if len(payload) >= _MAX_EXPECTED_TOOL_CALLS:
+            break
+    return tuple(payload)
+
+
 def _case_fixture_digest(case: CodingEvaluationCase) -> str:
     repository = case.repository
     composition = case.composition
     fixture = case.fixture
+    composition_payload: dict[str, object] = {
+        "policy": composition.policy,
+        "executable_allowlist": dict(composition.executable_allowlist),
+        "validators": [
+            {
+                "id": item.validator_id,
+                "argv": list(item.argv),
+                "cwd": item.cwd.as_posix(),
+                "timeout_seconds": item.timeout_seconds,
+                "stdout_limit_bytes": item.stdout_limit_bytes,
+                "stderr_limit_bytes": item.stderr_limit_bytes,
+                "accepted_exit_codes": sorted(item.accepted_exit_codes),
+            }
+            for item in composition.validators
+        ],
+        "max_iterations": composition.max_iterations,
+        "max_governed_calls": composition.max_governed_calls,
+        "secret_names": list(composition.secret_names),
+        "secret_values": list(composition.secret_values),
+    }
+    if composition.hook_fixture != "none":
+        composition_payload["hook_fixture"] = composition.hook_fixture
     payload = {
         "id": case.case_id,
         "modes": sorted(item.value for item in case.modes),
@@ -906,26 +1411,7 @@ def _case_fixture_digest(case: CodingEvaluationCase) -> str:
             "approval_decisions": [item.value for item in fixture.approval_decisions],
             "failure": fixture.failure,
         },
-        "composition": {
-            "policy": composition.policy,
-            "executable_allowlist": dict(composition.executable_allowlist),
-            "validators": [
-                {
-                    "id": item.validator_id,
-                    "argv": list(item.argv),
-                    "cwd": item.cwd.as_posix(),
-                    "timeout_seconds": item.timeout_seconds,
-                    "stdout_limit_bytes": item.stdout_limit_bytes,
-                    "stderr_limit_bytes": item.stderr_limit_bytes,
-                    "accepted_exit_codes": sorted(item.accepted_exit_codes),
-                }
-                for item in composition.validators
-            ],
-            "max_iterations": composition.max_iterations,
-            "max_governed_calls": composition.max_governed_calls,
-            "secret_names": list(composition.secret_names),
-            "secret_values": list(composition.secret_values),
-        },
+        "composition": composition_payload,
         "expected": _expected_digest_payload(case.expected),
     }
     return compute_coding_fixture_digest(payload)
@@ -971,6 +1457,7 @@ def _parse_validator_fixture(data: Mapping[str, Any]) -> CodingEvaluationValidat
 def _parse_expected(data: Mapping[str, Any]) -> CodingEvaluationExpected:
     raw_answer = cast(dict[str, Any], data["answer"])
     raw_diff = cast(dict[str, Any], data["diff"])
+    raw_context = cast(dict[str, Any], data.get("context", {}))
     changes = tuple(
         CodingEvaluationChangeExpectation(
             path=PurePosixPath(cast(str, item["path"])),
@@ -1016,8 +1503,36 @@ def _parse_expected(data: Mapping[str, Any]) -> CodingEvaluationExpected:
                 effect_state=EffectState(cast(str, item["effect_state"])),
                 executor_attempts=int(item["executor_attempts"]),
                 guards_passed=cast(bool, item["guards_passed"]),
+                pre_hook_outcomes=tuple(
+                    HookOutcome(value)
+                    for value in cast(list[str], item.get("pre_hook_outcomes", []))
+                ),
+                post_hook_outcomes=tuple(
+                    HookOutcome(value)
+                    for value in cast(list[str], item.get("post_hook_outcomes", []))
+                ),
+                diagnostics_contains_all=tuple(
+                    cast(list[str], item.get("diagnostics_contains_all", []))
+                ),
+                diagnostics_absent_all=tuple(
+                    cast(list[str], item.get("diagnostics_absent_all", []))
+                ),
             )
             for item in cast(list[dict[str, Any]], data["governance"])
+        ),
+        tool_calls=tuple(
+            CodingEvaluationToolCallExpectation(
+                call_id=cast(str, item["call_id"]),
+                name=cast(str, item["name"]),
+                arguments=cast(dict[str, object], item["arguments"]),
+                outcome=ToolOutcome(cast(str, item["outcome"])),
+                error_code=(
+                    ToolErrorCode(cast(str, item["error_code"]))
+                    if item.get("error_code") is not None
+                    else None
+                ),
+            )
+            for item in cast(list[dict[str, Any]], data.get("tool_calls", []))
         ),
         required_event_types=tuple(
             RunEventType(value) for value in cast(list[str], data["required_event_types"])
@@ -1028,6 +1543,16 @@ def _parse_expected(data: Mapping[str, Any]) -> CodingEvaluationExpected:
             max_elapsed_seconds=float(raw_limits["max_elapsed_seconds"]),
             max_rendered_diff_characters=int(raw_limits["max_rendered_diff_characters"]),
             max_validator_output_characters=int(raw_limits["max_validator_output_characters"]),
+        ),
+        context=CodingEvaluationContextExpectation(
+            selected_instruction_sources=tuple(
+                cast(list[str], raw_context.get("selected_instruction_sources", []))
+            ),
+            selected_skill_key=cast(str | None, raw_context.get("selected_skill_key")),
+            selected_skill_body=cast(bool | None, raw_context.get("selected_skill_body")),
+            omission_reasons=tuple(
+                cast(list[str], raw_context.get("omission_reasons", []))
+            ),
         ),
         error_type=cast(str | None, cast(dict[str, Any], data["run"]).get("error_type")),
         error_category=cast(str | None, cast(dict[str, Any], data["run"]).get("error_category")),
@@ -1078,6 +1603,7 @@ def _parse_case(data: Mapping[str, Any]) -> CodingEvaluationCase:
         max_governed_calls=int(raw_composition.get("max_governed_calls", 1)),
         secret_names=tuple(cast(list[str], raw_composition.get("secret_names", []))),
         secret_values=tuple(cast(list[str], raw_composition.get("secret_values", []))),
+        hook_fixture=cast(str, raw_composition.get("hook_fixture", "none")),
     )
     return CodingEvaluationCase(
         case_id=cast(str, data["id"]),
@@ -1328,6 +1854,31 @@ def _report_governance(
                 secret_values=secret_values,
                 maximum=_MAX_REPORT_TEXT,
             ),
+            "diagnostics": [
+                _safe_text(
+                    value,
+                    workspace=workspace,
+                    secret_values=secret_values,
+                    maximum=256,
+                )
+                for value in record.sanitized_diagnostics[:8]
+            ],
+            "pre_hooks": [
+                {
+                    "identity": item.hook_identity,
+                    "outcome": item.outcome.value,
+                    "mode": None if item.mode is None else item.mode.value,
+                }
+                for item in record.pre_hook_results
+            ],
+            "post_hooks": [
+                {
+                    "identity": item.hook_identity,
+                    "outcome": item.outcome.value,
+                    "mode": None if item.mode is None else item.mode.value,
+                }
+                for item in record.post_hook_results
+            ],
             "observation_failure": record.observation_failure,
         }
         for record in records
@@ -1380,6 +1931,18 @@ def _report_validators(
     )
 
 
+def _report_context(
+    repository_context: Any,
+    context_window: Any,
+) -> Mapping[str, object]:
+    """Retain only the existing content-free context evidence projections."""
+
+    return {
+        "repository": dict(repository_context.event_attributes()),
+        "window": dict(context_window.event_attributes()),
+    }
+
+
 class CodingEvaluationRunner:
     """Run each case through a fresh production coding application."""
 
@@ -1426,6 +1989,8 @@ class CodingEvaluationRunner:
         diff_payload: Mapping[str, object] = {}
         validators_payload: tuple[Mapping[str, object], ...] = ()
         governance_payload: tuple[Mapping[str, object], ...] = ()
+        tool_calls_payload: tuple[Mapping[str, object], ...] = ()
+        context_payload: Mapping[str, object] = {}
         observation_limitations: tuple[str, ...] = ()
         model = _ScriptedCodingLLM(case.fixture.model_completions)
         event_collector = _RunEventCollector()
@@ -1475,6 +2040,14 @@ class CodingEvaluationRunner:
                         workspace=workspace,
                         secret_values=secret_values,
                     )
+                    if (
+                        evidence.repository_context is not None
+                        and evidence.context_window is not None
+                    ):
+                        context_payload = _report_context(
+                            evidence.repository_context,
+                            evidence.context_window,
+                        )
                 checks.extend(
                     self._evaluate_error(
                         case,
@@ -1508,6 +2081,15 @@ class CodingEvaluationRunner:
                     result.action_records,
                     workspace=workspace,
                     secret_values=secret_values,
+                )
+                tool_calls_payload = _report_tool_calls(
+                    result.agent.conversation,
+                    workspace=workspace,
+                    secret_values=secret_values,
+                )
+                context_payload = _report_context(
+                    result.repository_context,
+                    result.context_window,
                 )
                 observation_limitations = _safe_observation_limitations(
                     result.observation_limitations,
@@ -1579,10 +2161,12 @@ class CodingEvaluationRunner:
             verdict=verdict,
             output=output,
             checks=tuple(checks),
+            tool_calls=tool_calls_payload,
             changed_paths=changed_paths,
             diff=diff_payload,
             validators=validators_payload,
             governance=governance_payload,
+            context=context_payload,
             observation_limitations=observation_limitations,
             error=error_text,
             cleanup_error=cleanup_error,
@@ -1604,9 +2188,23 @@ class CodingEvaluationRunner:
         executable_allowlist = {
             identity: Path(sys.executable) for identity in composition.executable_allowlist
         }
+        if case.fixture.failure == "reject_then_stale_approval":
+            def stale_approval(request: object, context: object) -> ApprovalDecision:
+                del request, context
+                return ApprovalDecision(
+                    ApprovalOutcome.DRIFT,
+                    "fixture_stale_approval",
+                    provider_identity="stale-approval-fixture",
+                )
+
+            approval_provider: object = ScriptedApprovalProvider(
+                (ApprovalOutcome.REJECT, stale_approval)
+            )
+        else:
+            approval_provider = ScriptedApprovalProvider(case.fixture.approval_decisions)
         kwargs: dict[str, object] = {
             "policy": DefaultActionPolicy(),
-            "approval_provider": ScriptedApprovalProvider(case.fixture.approval_decisions),
+            "approval_provider": approval_provider,
             "validators": _validator_definitions(composition.validators),
             "executable_allowlist": executable_allowlist,
             "skill_roots": {
@@ -1620,6 +2218,30 @@ class CodingEvaluationRunner:
             "max_governed_calls": composition.max_governed_calls,
             "event_sinks": (event_collector,),
         }
+        if case.fixture.failure == "incomplete_observation":
+            kwargs["observer"] = _IncompleteObservationObserver(workspace)
+        if composition.hook_fixture == "required_pre_hook_failure":
+            kwargs["pre_hooks"] = (
+                PreActionHookSpec(
+                    cast(
+                        PreActionHook,
+                        _FixtureHook(
+                            "t14-required-pre-hook",
+                            HookOutcome.FAILED,
+                            "fixture_required_pre_hook_failure",
+                        ),
+                    ),
+                    HookMode.REQUIRED,
+                ),
+            )
+        elif composition.hook_fixture == "post_hook_failure":
+            kwargs["post_hooks"] = (
+                _FixtureHook(
+                    "t14-post-hook",
+                    HookOutcome.FAILED,
+                    "fixture_post_hook_failure",
+                ),
+            )
         if validator_runner is not None:
             kwargs["validator_runner"] = validator_runner
         return CodingAgentApplication.create(workspace, model, **kwargs)
@@ -1712,6 +2334,14 @@ class CodingEvaluationRunner:
                     secret_values=secret_values,
                 )
             )
+        checks.extend(
+            self._evaluate_tool_calls(
+                case,
+                None,
+                workspace,
+                secret_values,
+            )
+        )
         if evidence is None:
             checks.append(
                 _safe_check(
@@ -1787,6 +2417,14 @@ class CodingEvaluationRunner:
                 secret_values=secret_values,
             )
         )
+        checks.extend(
+            self._evaluate_tool_calls(
+                case,
+                result.agent.conversation,
+                workspace,
+                secret_values,
+            )
+        )
         output = result.output.content
         checks.append(
             _safe_check(
@@ -1848,6 +2486,15 @@ class CodingEvaluationRunner:
         checks.extend(
             self._evaluate_governance(case, result.action_records, workspace, secret_values)
         )
+        checks.extend(
+            self._evaluate_context(
+                case,
+                result.repository_context,
+                result.context_window,
+                workspace,
+                secret_values,
+            )
+        )
         checks.extend(self._evaluate_events(case, result.events, workspace, secret_values))
         if expected.verdict is not None:
             checks.append(
@@ -1870,6 +2517,100 @@ class CodingEvaluationRunner:
                 secret_values,
             )
         )
+        return tuple(checks)
+
+    @staticmethod
+    def _evaluate_tool_calls(
+        case: CodingEvaluationCase,
+        conversation: Sequence[ConversationItem] | None,
+        workspace: Workspace,
+        secret_values: Sequence[str],
+    ) -> tuple[CodingEvaluationCheck, ...]:
+        expected = case.expected.tool_calls
+        if not expected:
+            return ()
+        if conversation is None:
+            return (
+                _safe_check(
+                    "tools.evidence_available",
+                    False,
+                    "tool-call trajectory evidence is unavailable",
+                    workspace=workspace,
+                    secret_values=secret_values,
+                ),
+            )
+
+        actual_calls = [item for item in conversation if isinstance(item, ToolCall)]
+        actual_results = [item for item in conversation if isinstance(item, ToolResult)]
+        results_by_call_id = {item.call_id: item for item in actual_results}
+        checks = [
+            _safe_check(
+                "tools.count",
+                len(actual_calls) == len(expected) and len(actual_results) == len(expected),
+                (
+                    f"expected {len(expected)} tool calls/results, observed "
+                    f"{len(actual_calls)} calls/{len(actual_results)} results"
+                ),
+                workspace=workspace,
+                secret_values=secret_values,
+            )
+        ]
+        for index, wanted in enumerate(expected):
+            if index >= len(actual_calls):
+                checks.append(
+                    _safe_check(
+                        f"tools.call[{index}]",
+                        False,
+                        f"expected tool call {wanted.call_id!r} is missing",
+                        workspace=workspace,
+                        secret_values=secret_values,
+                    )
+                )
+                continue
+            actual_call = actual_calls[index]
+            actual_result = results_by_call_id.get(actual_call.call_id)
+            try:
+                actual_arguments: object = json.loads(actual_call.arguments)
+            except (TypeError, json.JSONDecodeError):
+                actual_arguments = None
+            observed = (
+                None
+                if actual_result is None
+                else (
+                    actual_result.call_id,
+                    actual_result.name,
+                    actual_result.outcome.value,
+                    None
+                    if actual_result.error_code is None
+                    else actual_result.error_code.value,
+                )
+            )
+            passed = (
+                actual_call.call_id == wanted.call_id
+                and actual_call.name == wanted.name
+                and actual_arguments == dict(wanted.arguments)
+                and actual_result is not None
+                and actual_result.call_id == wanted.call_id
+                and actual_result.name == wanted.name
+                and actual_result.outcome is wanted.outcome
+                and actual_result.error_code is wanted.error_code
+            )
+            checks.append(
+                _safe_check(
+                    f"tools.call[{index}]",
+                    passed,
+                    (
+                        f"expected {wanted.call_id}/{wanted.name} "
+                        f"{dict(wanted.arguments)!r} -> "
+                        f"{wanted.outcome.value}/"
+                        f"{wanted.error_code.value if wanted.error_code else None}, "
+                        f"observed {actual_call.call_id}/{actual_call.name} "
+                        f"{actual_arguments!r} -> {observed!r}"
+                    ),
+                    workspace=workspace,
+                    secret_values=secret_values,
+                )
+            )
         return tuple(checks)
 
     def _evaluate_diff(
@@ -1985,6 +2726,8 @@ class CodingEvaluationRunner:
                 item.effect_state.value,
                 item.executor_attempts,
                 _action_guards_passed(item),
+                tuple(result.outcome.value for result in item.pre_hook_results),
+                tuple(result.outcome.value for result in item.post_hook_results),
             )
             for item in actual
         ]
@@ -1996,10 +2739,12 @@ class CodingEvaluationRunner:
                 item.effect_state.value,
                 item.executor_attempts,
                 item.guards_passed,
+                tuple(result.value for result in item.pre_hook_outcomes),
+                tuple(result.value for result in item.post_hook_outcomes),
             )
             for item in expected
         ]
-        return (
+        checks: list[CodingEvaluationCheck] = [
             _safe_check(
                 "governance.exact_trajectory",
                 observed == wanted,
@@ -2007,7 +2752,127 @@ class CodingEvaluationRunner:
                 workspace=workspace,
                 secret_values=secret_values,
             ),
+        ]
+        for index, (record, expectation) in enumerate(zip(actual, expected, strict=False)):
+            diagnostics = tuple(record.sanitized_diagnostics)
+            missing = [
+                value
+                for value in expectation.diagnostics_contains_all
+                if value not in diagnostics
+            ]
+            present = [
+                value
+                for value in expectation.diagnostics_absent_all
+                if value in diagnostics
+            ]
+            if expectation.diagnostics_contains_all or expectation.diagnostics_absent_all:
+                checks.append(
+                    _safe_check(
+                        f"governance[{index}].diagnostics",
+                        not missing and not present,
+                        (
+                            "required diagnostics observed and forbidden diagnostics absent"
+                            if not missing and not present
+                            else f"missing={missing}, forbidden_present={present}"
+                        ),
+                        workspace=workspace,
+                        secret_values=secret_values,
+                    )
+                )
+        return tuple(checks)
+
+    def _evaluate_context(
+        self,
+        case: CodingEvaluationCase,
+        repository_context: Any,
+        context_window: Any,
+        workspace: Workspace,
+        secret_values: Sequence[str],
+    ) -> tuple[CodingEvaluationCheck, ...]:
+        expected = case.expected.context
+        if (
+            not expected.selected_instruction_sources
+            and expected.selected_skill_key is None
+            and expected.selected_skill_body is None
+            and not expected.omission_reasons
+        ):
+            return ()
+        actual_sources = tuple(
+            item.source.as_posix() for item in repository_context.instructions
         )
+        actual_skill_key = (
+            repository_context.selected_skill.key
+            if repository_context.selected_skill is not None
+            else None
+        )
+        actual_skill_body = repository_context.selected_skill is not None
+        actual_omission_reasons = tuple(
+            dict.fromkeys(
+                getattr(item.reason, "value", str(item.reason))
+                for item in repository_context.all_omissions
+            )
+        )
+        checks: list[CodingEvaluationCheck] = []
+        if expected.selected_instruction_sources:
+            checks.append(
+                _safe_check(
+                    "context.instruction_sources",
+                    actual_sources == expected.selected_instruction_sources,
+                    (
+                        f"expected instruction sources {expected.selected_instruction_sources!r}, "
+                        f"observed {actual_sources!r}"
+                    ),
+                    workspace=workspace,
+                    secret_values=secret_values,
+                )
+            )
+        if expected.selected_skill_key is not None:
+            checks.append(
+                _safe_check(
+                    "context.selected_skill_key",
+                    actual_skill_key == expected.selected_skill_key,
+                    (
+                        f"expected selected skill {expected.selected_skill_key!r}, "
+                        f"observed {actual_skill_key!r}"
+                    ),
+                    workspace=workspace,
+                    secret_values=secret_values,
+                )
+            )
+        if expected.selected_skill_body is not None:
+            checks.append(
+                _safe_check(
+                    "context.selected_skill_body",
+                    actual_skill_body == expected.selected_skill_body,
+                    (
+                        f"expected selected skill body={expected.selected_skill_body}, "
+                        f"observed {actual_skill_body}"
+                    ),
+                    workspace=workspace,
+                    secret_values=secret_values,
+                )
+            )
+        if expected.omission_reasons:
+            missing = [
+                reason
+                for reason in expected.omission_reasons
+                if reason not in actual_omission_reasons
+            ]
+            checks.append(
+                _safe_check(
+                    "context.omission_reasons",
+                    not missing,
+                    (
+                        "expected omission reasons observed"
+                        if not missing
+                        else f"missing omission reasons: {missing}"
+                    ),
+                    workspace=workspace,
+                    secret_values=secret_values,
+                )
+            )
+        del context_window
+        return tuple(checks)
 
     def _evaluate_events(
         self,
@@ -2285,6 +3150,8 @@ _CODING_EVALUATION_SCHEMA: dict[str, object] = {
                                 "validator_runner_error",
                                 "validator_runner_empty",
                                 "cleanup_failure",
+                                "reject_then_stale_approval",
+                                "incomplete_observation",
                             ]
                         },
                     },
@@ -2330,6 +3197,13 @@ _CODING_EVALUATION_SCHEMA: dict[str, object] = {
                     "type": "array",
                     "maxItems": 64,
                     "items": {"type": "string", "minLength": 1, "maxLength": 512},
+                },
+                "hook_fixture": {
+                    "enum": [
+                        "none",
+                        "required_pre_hook_failure",
+                        "post_hook_failure",
+                    ]
                 },
             },
         },
@@ -2406,6 +3280,11 @@ _CODING_EVALUATION_SCHEMA: dict[str, object] = {
                         },
                     },
                 },
+                "tool_calls": {
+                    "type": "array",
+                    "maxItems": _MAX_EXPECTED_TOOL_CALLS,
+                    "items": {"$ref": "#/$defs/tool_call_expectation"},
+                },
                 "verdict": {
                     "type": ["string", "null"],
                     "enum": ["passed", "failed", "indeterminate", "not_validated", None],
@@ -2434,6 +3313,28 @@ _CODING_EVALUATION_SCHEMA: dict[str, object] = {
                         "target_complete": {"type": "boolean"},
                         "forbidden_complete": {"type": "boolean"},
                         "rendered_diff_complete": {"type": "boolean"},
+                    },
+                },
+                "context": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "selected_instruction_sources": {
+                            "type": "array",
+                            "maxItems": 32,
+                            "items": {"type": "string", "minLength": 1, "maxLength": 512},
+                        },
+                        "selected_skill_key": {
+                            "type": ["string", "null"],
+                            "minLength": 1,
+                            "maxLength": 128,
+                        },
+                        "selected_skill_body": {"type": ["boolean", "null"]},
+                        "omission_reasons": {
+                            "type": "array",
+                            "maxItems": 32,
+                            "items": {"type": "string", "minLength": 1, "maxLength": 128},
+                        },
                     },
                 },
                 "validators": {
@@ -2466,6 +3367,21 @@ _CODING_EVALUATION_SCHEMA: dict[str, object] = {
                 "after_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
             },
         },
+        "tool_call_expectation": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["call_id", "name", "arguments", "outcome"],
+            "properties": {
+                "call_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                "name": {"type": "string", "minLength": 1, "maxLength": 128},
+                "arguments": {"type": "object"},
+                "outcome": {"enum": [item.value for item in ToolOutcome]},
+                "error_code": {
+                    "type": ["string", "null"],
+                    "enum": [item.value for item in ToolErrorCode] + [None],
+                },
+            },
+        },
         "validator_expectation": {
             "type": "object",
             "additionalProperties": False,
@@ -2496,6 +3412,26 @@ _CODING_EVALUATION_SCHEMA: dict[str, object] = {
                 "effect_state": {"enum": [item.value for item in EffectState]},
                 "executor_attempts": {"enum": [0, 1]},
                 "guards_passed": {"type": "boolean"},
+                "pre_hook_outcomes": {
+                    "type": "array",
+                    "maxItems": 32,
+                    "items": {"enum": [item.value for item in HookOutcome]},
+                },
+                "post_hook_outcomes": {
+                    "type": "array",
+                    "maxItems": 32,
+                    "items": {"enum": [item.value for item in HookOutcome]},
+                },
+                "diagnostics_contains_all": {
+                    "type": "array",
+                    "maxItems": 8,
+                    "items": {"type": "string", "minLength": 1, "maxLength": 256},
+                },
+                "diagnostics_absent_all": {
+                    "type": "array",
+                    "maxItems": 8,
+                    "items": {"type": "string", "minLength": 1, "maxLength": 256},
+                },
             },
         },
         "limits": {

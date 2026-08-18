@@ -4,13 +4,13 @@ DQAgent is an engineering-first learning project for building AI Agent capabilit
 from foundational components. Its purpose is to understand the design of production-oriented agent
 systems instead of treating frameworks as black boxes.
 
-**Status:** Pre-alpha. Phase 8 is complete within its documented v1 scope, and Phase 9 T13 now
-provides a versioned disposable coding-evaluation substrate above the complete bounded coding path.
-DQAgent supports durable bounded sessions, explicit local RAG, optional exact-scope read-only memory
-recall, explicit source-to-transient-candidate extraction, and the
+**Status:** Pre-alpha. Phase 8 is complete within its documented v1 scope, and the Phase 9 T14
+implementation provides a representative credential-free coding baseline above the complete bounded
+coding path. T14 remains pending reviewer remediation and fresh closure; Phase 9 T15 final audit
+work remains planned. DQAgent supports durable bounded sessions, explicit local RAG, optional
+exact-scope read-only memory recall, explicit source-to-transient-candidate extraction, and the
 `CodingAgentApplication`/`dqagent-code` foreground CLI with provider-neutral boundaries, governed
-workspace actions, bounded diffs, trusted validators, and deterministic regression tests. Phase 9
-T14 representative cases and T15 final audit work remain planned.
+workspace actions, bounded diffs, trusted validators, and deterministic regression tests.
 
 ## Goals
 
@@ -45,7 +45,8 @@ T14 representative cases and T15 final audit work remain planned.
 - A foreground `dqagent-code` CLI with explicit workspace/message/targets/skills, exact approval
   summaries, bounded diff and validator output, evidence-derived verdicts, and blind-spot display.
 - A versioned disposable coding-evaluation substrate with fixture digests, fresh temporary
-  repositories, production-path execution, direct predicates, bounded reports, and cleanup status.
+  repositories, production-path execution, direct predicates, bounded reports, cleanup status, and a
+  committed 10-case credential-free representative baseline.
 - A bounded model/tool/observation loop with repeated-call protection.
 - Structured recovery observations for invalid arguments, unknown tools, timeouts, and tool errors.
 - Built-in `current_time` and deterministic `get_weather` demonstration tools.
@@ -196,22 +197,36 @@ the local subprocess backend's limits; local execution is not a host or workspac
 
 ## Disposable Coding Evaluation
 
-`dqagent-coding-eval` runs the versioned T13 coding cases in fresh temporary repositories. It replaces
+`dqagent-coding-eval` runs the versioned T14 coding cases in fresh temporary repositories. It replaces
 only deterministic model completions, approval decisions, and purpose-built failure fixtures; the
 resolver, governance, tools, subprocess backend, context projection, application, diff, and
 validators remain the production path.
 
 ```bash
 dqagent-coding-eval --mode deterministic \
-  --suite evaluations/cases/phase-9-coding-smoke-v1.json \
-  --output .local/evaluations/phase-9-coding-report.json
+  --suite evaluations/cases/phase-9-coding-baseline-v1.json \
+  --output .local/evaluations/phase-9-coding-baseline-report.json
 ```
 
-The current suite is intentionally three smoke/negative substrate cases, not the representative
-8-10-case T14 matrix or a coding-quality baseline. Cases do not share workspace, process, approval,
-cache, credential, session, retrieval, or memory state. Reports are bounded and retain cleanup
-failure separately from the evaluation result. The local subprocess backend remains non-sandboxed;
-this evaluator does not claim hostile-repository or host/process isolation.
+The T14 suite has 10 cases covering bounded read/search no-result, approved exact patch and validator
+success, traversal/protected/secret denial, rejected and stale approval, pre/post hooks, command
+nonzero/output-limit/timeout cleanup behavior, validator authority, nested hostile guidance with
+explicit skill loading and omission, and incomplete observation. Cases execute sequentially in the
+same evaluator host process. Each case receives a fresh repository, workspace, application, model
+fixture, approval fixture, and failure fixture; child processes use an explicit empty allowlist.
+The evaluator does not provide global-cache, process-tree, host-filesystem, network, credential,
+syscall, or workspace-only isolation; those guarantees remain Phase 13 scope. The committed
+baseline fixes schema, case digests, structural predicates, and deterministic fingerprint; timing is
+observational and is not a golden value. It cannot prove arbitrary hostile-repository safety or
+live-model coding quality. The local subprocess backend remains non-sandboxed.
+
+The original T13 substrate smoke suite remains available explicitly:
+
+```bash
+dqagent-coding-eval --mode deterministic \
+  --suite evaluations/cases/phase-9-coding-smoke-v1.json \
+  --output .local/evaluations/phase-9-coding-smoke-report.json
+```
 
 ## Usage
 

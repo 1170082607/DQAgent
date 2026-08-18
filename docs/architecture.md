@@ -2,7 +2,7 @@
 
 ## Status
 
-This document describes the implemented Phase 8 T5-T13 architecture and the Phase 9 T1-T13
+This document describes the implemented Phase 8 T5-T13 architecture and the Phase 9 T1-T14
 foundations. Memory management is available as a model-free explicit application service,
 request-time policy-filtered recall, an optional durable session read stage, a bounded context
 projection, a pure source-to-transient-candidate extraction boundary, and independent memory/session
@@ -10,8 +10,8 @@ CLI composition. Phase 9 currently has workspace authority/observation, prepared
 exact foreground approval, synchronous hook contracts, a governed execution/runtime bridge, bounded
 workspace read/search/patch tools, local bounded subprocess contracts, governed command/validator
 composition, the `CodingAgentApplication`/`dqagent-code` foreground path, and a disposable coding
-evaluation substrate. The representative coding matrix and final Phase 9 audit remain later
-checkpoints.
+evaluation substrate, and the representative coding baseline. The final Phase 9 audit remains a
+later checkpoint.
 The roadmap remains the source of truth for deferred capabilities.
 
 ## System Context
@@ -502,10 +502,18 @@ fixture consumption, and bounded attempts/calls/time/output. Reports sanitize pa
 arguments, and configured secret values. Cleanup is reported independently and still contributes to
 the case verdict, so cleanup failure cannot conceal the evaluation result.
 
-The T13 suite is intentionally a three-case substrate smoke suite. It is not the representative
-T14 matrix, a live-model quality evaluation, or a hostile-repository/process-isolation claim. Cases
-share no workspace, process, approval, cache, credential, session, retrieval, or memory state, and
-the case vocabulary remains domain-specific rather than a general policy or validator DSL.
+The T13 suite remains a three-case substrate smoke suite. The T14 suite
+`evaluations/cases/phase-9-coding-baseline-v1.json` adds 10 representative cases for bounded
+read/search no-result, exact approved patch/validator success, denial and approval failures, hooks,
+bounded command failure paths, validator authority, nested repository context/skills, and incomplete
+observation. Its committed credential-free baseline fixes case digests, structural predicates, and
+the deterministic fingerprint; timing observations are not golden values. The suite is not a
+live-model quality evaluation or a hostile-repository/process-isolation claim. Cases execute
+sequentially in the same evaluator host process. Each case receives a fresh repository, workspace,
+application, model fixture, approval fixture, and failure fixture; child processes use an explicit
+empty allowlist. The evaluator does not provide global-cache, process-tree, host-filesystem,
+network, credential, syscall, or workspace-only isolation; those guarantees remain Phase 13 scope.
+The case vocabulary remains domain-specific rather than a general policy or validator DSL.
 
 ## Workflow and Durable Execution
 
@@ -859,9 +867,12 @@ the runtime's model-attempt budget and defaults to three. All values are validat
   revalidation, deadline capability honesty, sanitization, ordered hook modes, and post-effect failure.
 - CI runs Ruff, strict mypy, and pytest with at least 85% coverage.
 - CI also runs the credential-free deterministic behavioral, context, retrieval, and Phase 8 memory
-  suites after implementation tests. The Phase 8 report uses the production memory/session path,
-  temporary SQLite databases, deterministic hashing embeddings, scripted extraction, and scripted
-  answers; it is a regression gate, not an LLM quality or compliance certification.
+  suites and the Phase 9 representative coding suite after implementation tests. The Phase 8 report
+  uses the production memory/session path, temporary SQLite databases, deterministic hashing
+  embeddings, scripted extraction, and scripted answers; it is a regression gate, not an LLM quality
+  or compliance certification. The Phase 9 report uses disposable repositories and the production
+  coding application; it cannot prove arbitrary hostile-repository safety or live-model coding
+  quality.
 
 No live model evaluation runs in CI because credentials, cost, provider drift, and network
 nondeterminism make it an unsuitable correctness gate.
@@ -873,7 +884,8 @@ nondeterminism make it an unsuitable correctness gate.
 - Agent-requested tool calls are sequential and tool retries are intentionally unsupported.
 - The coding application serializes one workspace in-process only. Its local subprocess backend does
   not isolate host filesystem, network, credentials, system calls, or descendant processes; Phase 9
-  T14 representative coding cases and T15 final audit are still pending.
+  T14 representative coding cases are covered by the credential-free baseline; T15 final audit
+  remains pending.
 - Event sinks are best-effort and no concrete durable telemetry adapter is included.
 - The legacy `AgentApplication` remains process-local and unbounded; durable behavior requires an
   explicit `SessionAgentApplication` or CLI `--session-id`.
@@ -919,5 +931,6 @@ nondeterminism make it an unsuitable correctness gate.
 - [Phase 6 Session and Context Comparison](learning/phase-6-session-context-comparison.md)
 - [Phase 7 Retrieval Framework Comparison](learning/phase-7-retrieval-framework-comparison.md)
 - [Phase 8 Memory Framework Comparison](learning/phase-8-memory-framework-comparison.md)
+- [Phase 9 Coding Harness Comparison](learning/phase-9-coding-harness-comparison.md)
 - [ADR-0009: Policy-Governed Long-Term Memory](adr/0009-policy-governed-long-term-memory.md)
 - [ADR-0010: Keep Memory Extraction Before Deterministic Admission](adr/0010-transient-memory-extraction-boundary.md)

@@ -1,9 +1,9 @@
 # Phase 9 Detailed Design: Coding Agent Harness and Safety
 
-- Status: Proposed
+- Status: Implemented in current worktree; T14 pending reviewer remediation and fresh closure
 - Date: 2026-08-13
-- Revised: 2026-08-13 after pre-implementation scope review
-- Roadmap status: Phase 9 remains `Planned`
+- Revised: 2026-08-18 after T14 implementation and reviewer disposition
+- Roadmap status: Phase 9 remains `In progress`; T15 `Final Audit` and overall closure are pending
 - Scope: Phase 9 only
 
 ## 1. Purpose and Authority
@@ -598,8 +598,11 @@ conflict, missing capability, resource/output limit, process failure, and observ
 `CodingEvaluationRunner` follows ADR-0004 and calls the production `CodingAgentApplication`. Each
 case materializes a fresh temporary repository from a reviewed fixture source, uses a controlled
 minimal environment, and owns its model script, approval fixture, policy, targets, skills,
-validators, expected diff, and forbidden paths. Cases share no workspace, approval state, mutable
-cache, credentials, child process, session, retrieval, or memory state.
+validators, expected diff, and forbidden paths. Cases execute sequentially in the same evaluator
+host process. Each case receives a fresh repository, workspace, application, model fixture,
+approval fixture, and failure fixture; child processes use an explicit empty allowlist. The
+evaluator does not provide global-cache, process-tree, host-filesystem, network, credential,
+syscall, or workspace-only isolation; those guarantees remain Phase 13 scope.
 
 Deterministic mode replaces only model completions, approval decisions, and purpose-built failure
 fixtures. It uses real workspace resolution, governance, tools, subprocess adapter, context
@@ -625,9 +628,12 @@ edges, every approval outcome, hook modes, individual limits, process races, dup
 and legacy Phase 3 behavior. The evaluation case format remains domain-specific and does not become a
 general validator or policy DSL.
 
-The T13 implementation intentionally stops at a three-case smoke/negative suite. It proves the
-substrate's production-path composition and negative meta-properties without claiming representative
-coding coverage or a baseline. Expanding to the cases above is the T14 checkpoint.
+The T13 implementation intentionally stops at a three-case smoke/negative suite. The T14
+implementation adds the representative 10-case suite
+`evaluations/cases/phase-9-coding-baseline-v1.json` and its credential-free baseline. It proves
+controlled production-path regression behavior without claiming arbitrary hostile-repository safety
+or live-model coding quality. Timing remains observational rather than golden; focused tests retain
+the combinatorial path coverage.
 
 ## 14. Implementation Dependency Graph
 
@@ -734,8 +740,12 @@ Implemented as `coding_evaluation.py`, `coding_evaluation_cli.py`, and the three
 
 ### T14: Representative cases, baseline, and documentation
 
-Add the 8-10 representative cases, credential-free baseline/CI command, architecture/evaluation
-documentation, and evidence-to-roadmap mapping.
+Implemented in the current worktree as the 10-case
+`evaluations/cases/phase-9-coding-baseline-v1.json` suite, the committed
+`evaluations/baselines/phase-9-coding-deterministic-v1.json` baseline, the CI
+`dqagent-coding-eval` command, updated architecture/evaluation documentation, and the Phase 9
+source-reading comparison. The T14 checkpoint remains open pending reviewer finding remediation
+and fresh closure. The baseline is credential-free and does not treat timing as golden.
 
 ### T15: Final audit and closure
 

@@ -147,29 +147,47 @@ The current gate does not require credentials.
 
 `cases/phase-9-coding-smoke-v1.json` is the T13 versioned coding-evaluation substrate. It deliberately
 contains only three smoke/negative cases: an explicit skill read, an approved single-file update with
-a trusted validator, and a rejected update with no effect. T13 establishes the evaluator contract; the
-representative 8-10-case matrix and any accepted baseline belong to T14.
+a trusted validator, and a rejected update with no effect.
+
+`cases/phase-9-coding-baseline-v1.json` is the T14 representative production-path suite. Its 10
+cases cover bounded read/search no-result, exact approved single-file edit and passing validator,
+traversal/protected/secret denial, rejected and stale approval, required pre-hook block, post-hook
+failure after an effect, command nonzero/output-limit/timeout cleanup behavior, validator failure
+overriding a model success claim, nested hostile `AGENTS.md` authority with explicit skill body and
+omission, and incomplete observation without false success. The cases are intentionally
+representative; path forms, schema edges, individual hook modes, process races, and other
+combinatorial outcomes remain focused tests.
 
 Run it with:
 
 ```bash
 dqagent-coding-eval --mode deterministic \
-  --suite evaluations/cases/phase-9-coding-smoke-v1.json \
-  --output .local/evaluations/phase-9-coding-report.json
+  --suite evaluations/cases/phase-9-coding-baseline-v1.json \
+  --output .local/evaluations/phase-9-coding-baseline-report.json
 ```
 
+`baselines/phase-9-coding-deterministic-v1.json` is the accepted credential-free baseline for the
+representative suite. It records 10/10 passed cases and the structural deterministic fingerprint.
+The fingerprint excludes generated IDs, report timestamps, output text, and check detail strings;
+observed timing and limit detail are not golden values.
+
 Each case declares the request, explicit targets and skills, repository fixture, trusted composition
-fixture, expected/forbidden diff, validator outcomes, governance trajectory, event subsequence, and
-required limits. The loader verifies a SHA-256 digest over the materialized fixture, normalized
-request, case identity/mode, and reviewed expected predicates before execution. The runner creates a
-new temporary repository and production
+fixture, expected/forbidden diff, validator outcomes, governance trajectory, content-free context
+evidence, event subsequence, and required limits. The loader verifies a SHA-256 digest over the
+materialized fixture, normalized request, case identity/mode, and reviewed expected predicates
+before execution. The runner creates a new temporary repository and production
 `CodingAgentApplication` for every case; only model completions, approval decisions, and
 purpose-built failure dependencies are substituted. Resolver, governance, tools, subprocess,
 context, application, diff, and validator behavior stays real.
 
 Reports use direct bounded predicates rather than a general policy or validator DSL. They include
-sanitized answer, diff, validator, governance, event, limit, and production observation-limitation
-evidence, plus an independent cleanup result. Cleanup failure makes the case fail but cannot turn an
-evaluation failure into a pass or hide the observed result. The suite shares no workspace, process,
-approval, cache, credential, session, retrieval, or memory state. T13 has no live mode and no
-committed coding baseline; local subprocess execution is not a host or workspace sandbox.
+sanitized answer, diff, validator, governance, tool-call, context, event, limit, and production
+observation-limitation evidence, plus an independent cleanup result. Cleanup failure makes the case
+fail but cannot turn an evaluation failure into a pass or hide the observed result. Cases execute
+sequentially in the same evaluator host process. Each case receives a fresh repository, workspace,
+application, model fixture, approval fixture, and failure fixture; child processes use an explicit
+empty allowlist. The evaluator does not provide global-cache, process-tree, host-filesystem,
+network, credential, syscall, or workspace-only isolation; those guarantees remain Phase 13 scope.
+T13/T14 have no live mode. The deterministic baseline proves controlled harness regression behavior;
+it cannot prove arbitrary hostile-repository safety or live-model coding quality. Local subprocess
+execution is not a host or workspace sandbox.

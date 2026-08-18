@@ -3285,7 +3285,8 @@ def _execute_search(
     omission_diagnostics = (
         (f"omissions={','.join(omission_parts)}",) if omission_parts else ()
     )
-    diagnostics = limit_diagnostics + omission_diagnostics
+    no_result_diagnostics = ("no_matches",) if status == "no_matches" else ()
+    diagnostics = limit_diagnostics + omission_diagnostics + no_result_diagnostics
     return ActionExecutionResult(output, diagnostics=diagnostics)
 
 

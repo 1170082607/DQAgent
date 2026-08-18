@@ -13,7 +13,6 @@ from dqagent.coding_evaluation import (
     CodingEvaluationDefinitionError,
     CodingEvaluationRunner,
     CodingEvaluationSuite,
-    CodingRepositoryFixture,
     load_coding_evaluation_suite,
 )
 from dqagent.coding_evaluation_cli import main as coding_evaluation_cli_main
@@ -397,19 +396,23 @@ def test_evaluator_preserves_indeterminate_observation_and_report(
     )
 
 
-def test_materialization_failure_is_sanitized_before_workspace_creation() -> None:
+def test_materialization_failure_is_sanitized_before_workspace_creation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     suite = load_suite()
-    collision_case = refresh_fixture_digest(
-        replace(
-            suite.cases[0],
-            repository=CodingRepositoryFixture(
-                files={"collision": "fixture file\n"},
-                skill_roots={"repository": "collision"},
-            ),
-        )
+    case = suite.cases[0]
+
+    def fail_materialize(repository) -> None:
+        del repository
+        raise FileExistsError("fixture materialization collision")
+
+    monkeypatch.setattr(
+        coding_evaluation_module._DisposableRepository,
+        "_materialize",
+        fail_materialize,
     )
 
-    result = CodingEvaluationRunner().run(with_case(collision_case)).results[0]
+    result = CodingEvaluationRunner().run(with_case(case)).results[0]
     rendered = json.dumps(result.to_dict(), ensure_ascii=True)
 
     assert result.passed is False
@@ -418,7 +421,7 @@ def test_materialization_failure_is_sanitized_before_workspace_creation() -> Non
     assert result.error is not None
     assert "FileExistsError" in result.error
     assert "dqagent-coding-eval-" not in rendered
-    assert "collision" not in rendered
+    assert "fixture materialization collision" not in rendered
     assert "WinError" not in rendered
 
 

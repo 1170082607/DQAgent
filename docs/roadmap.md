@@ -231,7 +231,7 @@ live-model memory-quality evaluation.
 
 ### Phase 9: Coding Agent Harness and Safety
 
-**Status:** In progress (T1-T13 implemented; T14-T15 planned)
+**Status:** In progress (T1-T13 complete; T14 implemented, pending review; T15 planned)
 
 **Outcome:** Validate the accumulated runtime in a realistic, bounded action environment.
 
@@ -249,8 +249,8 @@ live-model memory-quality evaluation.
 T12 is the first complete production application path: `CodingAgentApplication` coordinates one
 foreground run from target validation through final observation and trusted validators, while
 `dqagent-code` exposes the same composition. T13 now provides the evaluator substrate and a
-three-case smoke/negative suite. T14 adds representative cases and an accepted baseline; T15 adds
-final audit/closure evidence.
+three-case smoke/negative suite. T14 adds representative cases and an accepted baseline; its finding
+remediation and fresh closure precede T15 final audit/closure evidence.
 
 The initial coding agent should be useful with one model loop and a strong harness. Planning and
 multiple agents are added only after evaluation shows where the simpler design fails.
