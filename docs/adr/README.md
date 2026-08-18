@@ -35,3 +35,4 @@ Start from [0000-template.md](0000-template.md).
 - [ADR-0011: Govern Tool Actions Before Side Effects](0011-govern-tool-actions-before-side-effects.md)
 - [ADR-0012: Separate Workspace Containment from Process Isolation](0012-separate-workspace-containment-from-process-isolation.md)
 - [ADR-0013: Load Repository Instructions and Skills Through Context](0013-load-repository-resources-through-context.md)
+- [ADR-0014: Integrate MCP Tools Through a Governed Client Boundary](0014-integrate-mcp-tools-through-governed-client.md)

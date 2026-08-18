@@ -261,9 +261,15 @@ multiple agents are added only after evaluation shows where the simpler design f
 
 ### Phase 10: MCP and External Integration
 
-**Status:** Planned
+**Status:** In Progress
 
 **Outcome:** Discover and invoke external capabilities through a governed protocol boundary.
+
+The initial client, transport, trust, governance, and compatibility contract is proposed in
+[ADR-0014](adr/0014-integrate-mcp-tools-through-governed-client.md). Implementation evidence is
+required before that decision becomes Accepted.
+The bounded v1 task and acceptance contract is in the
+[Phase 10 Detailed Design](phase-10-detailed-design.md).
 
 - Implement an MCP client for tool discovery and invocation before building a server.
 - Translate schemas into the existing tool boundary with stable namespacing and collision behavior.
